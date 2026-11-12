@@ -1,0 +1,666 @@
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Worker;
+using Xunit;
+
+namespace TiaMcpServer.Tests.Project;
+
+public class ProjectSessionBindingTests
+{
+    [Fact]
+    public void BindingRequiredMessage_NamesBindProjectFirst()
+    {
+        var binding = new ProjectSessionBinding(null);
+
+        Assert.False(binding.TryGetVerified(null, out _, out var error));
+
+        Assert.Contains("bind_project", error);
+        Assert.True(error!.IndexOf("bind_project", StringComparison.Ordinal)
+            < error.IndexOf("open_project", StringComparison.Ordinal));
+        Assert.Contains("read-write/full", error);
+
+        var configured = new ProjectSessionBinding(@"C:\Projects\A.ap21");
+        Assert.False(configured.TryResolveWithSnapshot(@"C:\Projects\B.ap21", out _, out _, out var conflict));
+        Assert.Contains("bind_project with forceRebind=true", conflict);
+        Assert.True(conflict!.IndexOf("bind_project", StringComparison.Ordinal)
+            < conflict.IndexOf("open_project", StringComparison.Ordinal));
+        Assert.Contains("read-write/full", conflict);
+    }
+
+    private static WorkerSessionIdentity SelectionIdentity(string path = @"C:\Projects\P.ap21")
+        => new()
+        {
+            WorkerSessionId = "selection-worker",
+            SessionGeneration = 9,
+            PortalProcessId = 4242,
+            ProjectPath = path
+        };
+
+    [Theory]
+    [InlineData(ProjectBindingSnapshot.UnboundState)]
+    [InlineData(ProjectBindingSnapshot.ConfiguredUnverifiedState)]
+    [InlineData(ProjectBindingSnapshot.InvalidatedState)]
+    [InlineData(ProjectBindingSnapshot.VerifiedState)]
+    public void TryAdoptVerified_FromUnboundConfiguredInvalidatedAndOtherVerified_Verifies(string state)
+    {
+        var binding = new ProjectSessionBinding(
+            state == ProjectBindingSnapshot.UnboundState ? null : @"C:\Projects\C.ap21");
+        if (state is ProjectBindingSnapshot.VerifiedState or ProjectBindingSnapshot.InvalidatedState)
+            Assert.True(binding.BindVerified(SelectionIdentity(@"C:\Projects\C.ap21"), true, out _));
+        if (state == ProjectBindingSnapshot.InvalidatedState)
+            binding.Invalidate("worker restarted");
+        var before = binding.CaptureSnapshot();
+        Assert.Equal(state, before.State);
+
+        Assert.True(binding.TryAdoptVerified(before, SelectionIdentity("C:/Projects/P.ap21"), out var error));
+
+        Assert.Null(error);
+        var after = binding.CaptureSnapshot();
+        Assert.True(after.IsVerified);
+        Assert.NotEqual(before.BindingId, after.BindingId);
+        Assert.Equal(before.Revision + 1, after.Revision);
+        Assert.Equal(@"C:\Projects\P.ap21", after.ProjectPath);
+        Assert.Equal("selection-worker", after.WorkerSessionId);
+        Assert.Equal(9, after.SessionGeneration);
+        Assert.Equal(4242, after.PortalProcessId);
+        Assert.Null(after.InvalidatedReason);
+    }
+
+    [Fact]
+    public void TryAdoptVerified_SameIdentity_NoRevisionBump()
+    {
+        var binding = new ProjectSessionBinding(null);
+        var stale = binding.CaptureSnapshot();
+        Assert.True(binding.BindVerified(SelectionIdentity(), false, out _));
+        var before = binding.CaptureSnapshot();
+
+        // An identical concurrent response is accepted even when its expected revision is stale.
+        Assert.True(binding.TryAdoptVerified(stale, SelectionIdentity("C:/Projects/P.ap21"), out var error));
+
+        Assert.Null(error);
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+    }
+
+    [Fact]
+    public void TryAdoptVerified_NewGenerationAtSamePath_CreatesFreshEpoch()
+    {
+        var binding = new ProjectSessionBinding(null);
+        var path = Path.GetFullPath("P.ap21");
+        Assert.True(binding.BindVerified(SelectionIdentity(path), false, out _));
+        var before = binding.CaptureSnapshot();
+        var replacement = SelectionIdentity(path);
+        replacement.SessionGeneration++;
+
+        Assert.True(binding.TryAdoptVerified(before, replacement, out var error));
+
+        Assert.Null(error);
+        var after = binding.CaptureSnapshot();
+        Assert.Equal(before.ProjectPath, after.ProjectPath);
+        Assert.Equal(before.SessionGeneration + 1, after.SessionGeneration);
+        Assert.NotEqual(before.BindingId, after.BindingId);
+        Assert.Equal(before.Revision + 1, after.Revision);
+        Assert.False(before.SameBinding(after));
+    }
+
+    [Fact]
+    public void TryAdoptVerified_StaleExpected_FailsUnchanged()
+    {
+        var binding = new ProjectSessionBinding(null);
+        var stale = binding.CaptureSnapshot();
+        Assert.True(binding.BindVerified(SelectionIdentity(@"C:\Projects\C.ap21"), false, out _));
+        var before = binding.CaptureSnapshot();
+
+        Assert.False(binding.TryAdoptVerified(stale, SelectionIdentity(), out var error));
+
+        Assert.NotNull(error);
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+    }
+
+    [Theory]
+    [InlineData(null, 9, 4242, @"C:\Projects\P.ap21")]
+    [InlineData("   ", 9, 4242, @"C:\Projects\P.ap21")]
+    [InlineData("selection-worker", -1, 4242, @"C:\Projects\P.ap21")]
+    [InlineData("selection-worker", 9, null, @"C:\Projects\P.ap21")]
+    [InlineData("selection-worker", 9, 0, @"C:\Projects\P.ap21")]
+    [InlineData("selection-worker", 9, -1, @"C:\Projects\P.ap21")]
+    [InlineData("selection-worker", 9, 4242, null)]
+    [InlineData("selection-worker", 9, 4242, "   ")]
+    public void TryAdoptVerified_IncompleteIdentity_Fails(string? worker, long generation, int? process, string? path)
+    {
+        var binding = new ProjectSessionBinding(@"C:\Projects\C.ap21");
+        var before = binding.CaptureSnapshot();
+        var identity = new WorkerSessionIdentity
+        {
+            WorkerSessionId = worker!,
+            SessionGeneration = generation,
+            PortalProcessId = process,
+            ProjectPath = path
+        };
+
+        Assert.False(binding.TryAdoptVerified(before, identity, out var error));
+
+        Assert.NotNull(error);
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+    }
+
+    [Fact]
+    public void TryAdoptVerified_NullIdentity_Fails()
+    {
+        var binding = new ProjectSessionBinding(null);
+        var before = binding.CaptureSnapshot();
+
+        Assert.False(binding.TryAdoptVerified(before, null, out var error));
+
+        Assert.NotNull(error);
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+    }
+
+    [Fact]
+    public void FirstExplicitProjectPathIsRejectedWithoutChangingTheSession()
+    {
+        var binding = new ProjectSessionBinding(null);
+
+        var before = binding.CaptureSnapshot();
+
+        Assert.False(binding.TryResolveWithSnapshot("C:\\Projects\\Line.ap21", out var snapshot, out var effectivePath, out var error));
+
+        Assert.Null(effectivePath);
+        Assert.Equal(ProjectSessionBinding.BindFirstMessage, error);
+        Assert.True(before.SameBinding(snapshot));
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+        Assert.Null(binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void RepeatedSameProjectPath_WithDotDotSegments_IsAcceptedAsTheSameProject()
+    {
+        // Finding 3 regression: the binding stores TIA's canonical Project.Path.FullName, so a
+        // later caller who spells the same project differently (relative segments here, but the
+        // same applies to forward-vs-back slashes or trailing separators) must still match -
+        // Trim()-only comparison previously rejected this as "already bound to a different project".
+        var binding = new ProjectSessionBinding(null);
+        binding.Bind("C:\\Projects\\Line.ap21", forceRebind: false, out _);
+
+        Assert.True(binding.TryResolveWithSnapshot(
+            "C:\\Projects\\Other\\..\\Line.ap21",
+            out _,
+            out var effectivePath,
+            out var error));
+
+        Assert.Equal("C:\\Projects\\Line.ap21", effectivePath);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void RepeatedSameProjectPath_WithForwardSlashes_IsAcceptedAsTheSameProject()
+    {
+        var binding = new ProjectSessionBinding(null);
+        binding.Bind("C:\\Projects\\Line.ap21", forceRebind: false, out _);
+
+        Assert.True(binding.TryResolveWithSnapshot(
+            "C:/Projects/Line.ap21",
+            out _,
+            out var effectivePath,
+            out var error));
+
+        Assert.Equal("C:\\Projects\\Line.ap21", effectivePath);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void RepeatedSameProjectPathIsAccepted()
+    {
+        var binding = new ProjectSessionBinding(null);
+        binding.Bind("C:\\Projects\\Line.ap21", forceRebind: false, out _);
+
+        Assert.True(binding.TryResolveWithSnapshot("C:\\Projects\\Line.ap21", out _, out var effectivePath, out var error));
+
+        Assert.Equal("C:\\Projects\\Line.ap21", effectivePath);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void DifferentProjectPathIsRejectedAfterBinding()
+    {
+        var binding = new ProjectSessionBinding(null);
+        binding.Bind("C:\\Projects\\Line.ap21", forceRebind: false, out _);
+
+        Assert.False(binding.TryResolveWithSnapshot("C:\\Projects\\Other.ap21", out _, out var effectivePath, out var error));
+
+        Assert.Null(effectivePath);
+        Assert.Contains("already bound", error);
+    }
+
+    [Fact]
+    public void OmittedProjectPathUsesStartupProjectPath()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Startup.ap21");
+
+        Assert.True(binding.TryResolveWithSnapshot(null, out _, out var effectivePath, out var error));
+
+        Assert.Equal("C:\\Projects\\Startup.ap21", effectivePath);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void BindStoresTrimmedProjectPath()
+    {
+        var binding = new ProjectSessionBinding(null);
+
+        Assert.True(binding.Bind("  C:\\Projects\\Line.ap21  ", forceRebind: false, out var error));
+
+        Assert.Null(error);
+        Assert.Equal("C:\\Projects\\Line.ap21", binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void BindSetsUnboundProjectPath()
+    {
+        var binding = new ProjectSessionBinding(null);
+
+        Assert.True(binding.Bind("C:\\Projects\\Line.ap21", forceRebind: false, out var error));
+
+        Assert.Null(error);
+        Assert.Equal("C:\\Projects\\Line.ap21", binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void BindRejectsDifferentProjectPathWithoutForce()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.False(binding.Bind("C:\\Projects\\Other.ap21", forceRebind: false, out var error));
+
+        Assert.Contains("already bound", error);
+        Assert.Equal("C:\\Projects\\Line.ap21", binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void BindForceRebindsDifferentProjectPath()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.True(binding.Bind("C:\\Projects\\Other.ap21", forceRebind: true, out var error));
+
+        Assert.Null(error);
+        Assert.Equal("C:\\Projects\\Other.ap21", binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void ClearRemovesMatchingProjectBinding()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.True(binding.Clear("C:\\Projects\\Line.ap21", out var error));
+
+        Assert.Null(error);
+        Assert.Null(binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RecoveryClear_RejectsSamePathRevisionOrStateChange(bool invalidate)
+    {
+        var binding = new ProjectSessionBinding(@"C:\Projects\A.ap21");
+        var expected = binding.CaptureSnapshot();
+        if (invalidate) binding.Invalidate("Concurrent context loss");
+        else Assert.True(binding.Bind(expected.ProjectPath!, true, out _));
+        var concurrent = binding.CaptureSnapshot();
+
+        Assert.False(binding.TryClear(expected, out var cleared));
+        Assert.Null(cleared);
+        Assert.True(concurrent.SameBinding(binding.CaptureSnapshot()));
+    }
+
+    [Fact]
+    public void RecoveryClear_ReturnsExactUnboundRevision()
+    {
+        var binding = new ProjectSessionBinding(@"C:\Projects\A.ap21");
+        var expected = binding.CaptureSnapshot();
+
+        Assert.True(binding.TryClear(expected, out var cleared));
+
+        Assert.Equal(ProjectBindingSnapshot.UnboundState, cleared!.State);
+        Assert.Null(cleared.ProjectPath);
+        Assert.Equal(expected.Revision + 1, cleared.Revision);
+        Assert.True(cleared.SameBinding(binding.CaptureSnapshot()));
+        Assert.True(binding.Bind(expected.ProjectPath!, true, out _));
+        Assert.Equal(ProjectBindingSnapshot.UnboundState, cleared.State);
+        Assert.False(cleared.SameBinding(binding.CaptureSnapshot()));
+    }
+
+    [Fact]
+    public void ClearWithNullPath_ClearsAnyBinding()
+    {
+        // The Close BindingTransition falls back to Clear(null) so a session always ends unbound
+        // after a successful close, regardless of which project was bound. Clear(null) is
+        // unconditional: no path is named to conflict with, so it clears whatever is bound.
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.True(binding.Clear(null, out var error));
+
+        Assert.Null(error);
+        Assert.Null(binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void ClearRejectsDifferentProjectPath()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.False(binding.Clear("C:\\Projects\\Other.ap21", out var error));
+
+        Assert.Contains("already bound", error);
+        Assert.Equal("C:\\Projects\\Line.ap21", binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void TryResolve_RejectionMentionsForceRebindEscapeHatch()
+    {
+        var binding = new ProjectSessionBinding(@"C:\Projects\a.ap21");
+
+        var resolved = binding.TryResolveWithSnapshot(@"C:\Projects\b.ap21", out _, out _, out var error);
+
+        Assert.False(resolved);
+        Assert.Contains("forceRebind", error);
+        Assert.Contains("open_project", error);
+    }
+
+    [Fact]
+    public void CanBindAllowsFirstBindingWithoutMutating()
+    {
+        var binding = new ProjectSessionBinding(null);
+
+        Assert.True(binding.CanBind("C:\\Projects\\Line.ap21", forceRebind: false, out var error));
+
+        Assert.Null(error);
+        Assert.Null(binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void CanBindRejectsDifferentProjectPathWithoutMutating()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.False(binding.CanBind("C:\\Projects\\Other.ap21", forceRebind: false, out var error));
+
+        Assert.Contains("already bound", error);
+        Assert.Equal("C:\\Projects\\Line.ap21", binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void CanBindAllowsDifferentProjectPathWhenForced()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.True(binding.CanBind("C:\\Projects\\Other.ap21", forceRebind: true, out var error));
+
+        Assert.Null(error);
+        Assert.Equal("C:\\Projects\\Line.ap21", binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void CanBindRejectsBlankProjectPath()
+    {
+        var binding = new ProjectSessionBinding(null);
+
+        Assert.False(binding.CanBind("   ", forceRebind: false, out var error));
+
+        Assert.Equal("Project path is required.", error);
+    }
+
+    [Fact]
+    public void TryResolve_UnboundNullPathRemainsNeutral()
+    {
+        var binding = new ProjectSessionBinding(null);
+        var before = binding.CaptureSnapshot();
+
+        Assert.True(binding.TryResolveWithSnapshot(null, out var snapshot, out var effective, out var error));
+
+        Assert.Null(effective);
+        Assert.Null(error);
+        Assert.True(before.SameBinding(snapshot));
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+        Assert.Null(binding.CaptureSnapshot().ProjectPath);
+    }
+
+    [Fact]
+    public void TryResolve_RejectsRepeatedExplicitPathsWithoutBinding()
+    {
+        var binding = new ProjectSessionBinding(null);
+        var before = binding.CaptureSnapshot();
+
+        Assert.False(binding.TryResolveWithSnapshot("C:\\a.ap21", out var first, out var firstEffective, out var firstError));
+        Assert.False(binding.TryResolveWithSnapshot("C:\\b.ap21", out var second, out var effective, out var error));
+
+        Assert.Null(firstEffective);
+        Assert.Null(effective);
+        Assert.Equal(ProjectSessionBinding.BindFirstMessage, firstError);
+        Assert.Equal(ProjectSessionBinding.BindFirstMessage, error);
+        Assert.True(before.SameBinding(first));
+        Assert.True(before.SameBinding(second));
+        Assert.True(before.SameBinding(binding.CaptureSnapshot()));
+    }
+
+    [Fact]
+    public void TryResolve_StillRejectsADifferentPathOnceBound()
+    {
+        var binding = new ProjectSessionBinding(null);
+        Assert.True(binding.Bind("C:\\a.ap21", forceRebind: false, out _));
+
+        Assert.False(binding.TryResolveWithSnapshot("C:\\b.ap21", out _, out _, out var error));
+
+        Assert.Contains("already bound", error);
+        Assert.Contains("forceRebind=true", error);
+    }
+
+    [Fact]
+    public void AllRejectionPathsGiveIdenticalRebindInstructions()
+    {
+        const string bound = "C:\\Projects\\Line.ap21";
+        const string other = "C:\\Projects\\Other.ap21";
+
+        var forTryResolve = new ProjectSessionBinding(bound);
+        forTryResolve.TryResolveWithSnapshot(other, out _, out _, out var tryResolveError);
+
+        var forBind = new ProjectSessionBinding(bound);
+        forBind.Bind(other, forceRebind: false, out var bindError);
+
+        var forCanBind = new ProjectSessionBinding(bound);
+        forCanBind.CanBind(other, forceRebind: false, out var canBindError);
+
+        Assert.NotNull(tryResolveError);
+        Assert.Equal(tryResolveError, bindError);
+        Assert.Equal(tryResolveError, canBindError);
+        Assert.Contains("forceRebind=true", tryResolveError);
+        Assert.Contains("open_project", tryResolveError);
+    }
+
+    [Fact]
+    public void StartupPathIsNotWriteReadyUntilWorkerIdentityPromotesIt()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+
+        Assert.Equal(ProjectBindingSnapshot.ConfiguredUnverifiedState, binding.CaptureSnapshot().State);
+        Assert.False(binding.TryGetVerified(null, out _, out var beforeError));
+        Assert.Contains("worker-verified", beforeError);
+
+        Assert.True(binding.TryPromoteConfigured(
+            new WorkerSessionIdentity
+            {
+                WorkerSessionId = "worker-a",
+                SessionGeneration = 7,
+                PortalProcessId = 4242,
+                ProjectPath = "C:/Projects/Line.ap21"
+            },
+            out var promoteError));
+
+        Assert.Null(promoteError);
+        Assert.True(binding.TryGetVerified(null, out var verified, out var verifiedError));
+        Assert.Null(verifiedError);
+        Assert.Equal(ProjectBindingSnapshot.VerifiedState, verified!.State);
+        Assert.Equal("worker-a", verified.WorkerSessionId);
+        Assert.Equal(7, verified.SessionGeneration);
+        Assert.Equal(4242, verified.PortalProcessId);
+        Assert.Equal("C:\\Projects\\Line.ap21", verified.ProjectPath);
+    }
+
+    [Fact]
+    public void InvalidatedIdentityFailsClosedEvenForTheSameProjectPath()
+    {
+        var binding = new ProjectSessionBinding(null);
+        Assert.True(binding.BindVerified(
+            new WorkerSessionIdentity
+            {
+                WorkerSessionId = "worker-a",
+                SessionGeneration = 1,
+                PortalProcessId = 4242,
+                ProjectPath = "C:\\Projects\\Line.ap21"
+            },
+            forceRebind: false,
+            out _));
+
+        Assert.False(binding.MatchesVerifiedIdentity(
+            new WorkerSessionIdentity
+            {
+                WorkerSessionId = "worker-b",
+                SessionGeneration = 1,
+                PortalProcessId = 4242,
+                ProjectPath = "C:\\Projects\\Line.ap21"
+            },
+            out var mismatch));
+        Assert.Contains("worker session identity changed", mismatch, StringComparison.OrdinalIgnoreCase);
+
+        binding.Invalidate(mismatch!);
+
+        Assert.Equal(ProjectBindingSnapshot.InvalidatedState, binding.CaptureSnapshot().State);
+        Assert.False(binding.TryGetVerified("C:\\Projects\\Line.ap21", out _, out var writeError));
+        Assert.False(binding.TryResolveWithSnapshot("C:\\Projects\\Line.ap21", out _, out _, out var routeError));
+        Assert.Contains("invalidated", writeError);
+        Assert.Contains("invalidated", routeError);
+    }
+
+    [Fact]
+    public void ReassertingSamePathDoesNotDiscardVerifiedWorkerIdentity()
+    {
+        var binding = new ProjectSessionBinding(null);
+        Assert.True(binding.BindVerified(
+            new WorkerSessionIdentity
+            {
+                WorkerSessionId = "worker-a",
+                SessionGeneration = 3,
+                PortalProcessId = 4242,
+                ProjectPath = "C:\\Projects\\Line.ap21"
+            },
+            forceRebind: false,
+            out _));
+        var before = binding.CaptureSnapshot();
+
+        Assert.True(binding.Bind("C:/Projects/Line.ap21", forceRebind: false, out var error));
+
+        Assert.Null(error);
+        var after = binding.CaptureSnapshot();
+        Assert.True(after.IsVerified);
+        Assert.Equal(before.BindingId, after.BindingId);
+        Assert.Equal(before.Revision, after.Revision);
+        Assert.Equal(before.WorkerSessionId, after.WorkerSessionId);
+    }
+
+    [Fact]
+    public void ForceReassertingSamePathCreatesFreshConfiguredUnverifiedRevision()
+    {
+        var binding = new ProjectSessionBinding(null);
+        Assert.True(binding.BindVerified(
+            new WorkerSessionIdentity
+            {
+                WorkerSessionId = "worker-a",
+                SessionGeneration = 3,
+                PortalProcessId = 4242,
+                ProjectPath = @"C:\Projects\Line.ap21"
+            },
+            forceRebind: false,
+            out _));
+        var before = binding.CaptureSnapshot();
+
+        Assert.True(binding.Bind(
+            "C:/Projects/Line.ap21",
+            forceRebind: true,
+            out var error));
+
+        Assert.Null(error);
+        var after = binding.CaptureSnapshot();
+        Assert.Equal(ProjectBindingSnapshot.ConfiguredUnverifiedState, after.State);
+        Assert.False(after.IsVerified);
+        Assert.Equal(before.ProjectPath, after.ProjectPath);
+        Assert.NotEqual(before.BindingId, after.BindingId);
+        Assert.True(after.Revision > before.Revision);
+        Assert.Null(after.WorkerSessionId);
+        Assert.Null(after.SessionGeneration);
+        Assert.Null(after.PortalProcessId);
+        Assert.False(binding.TryGetVerified(
+            @"C:\Projects\Line.ap21",
+            out _,
+            out _));
+    }
+
+    [Fact]
+    public void TryPromoteConfigured_AcceptsTheSameCompleteIdentityIdempotently()
+    {
+        var binding = new ProjectSessionBinding("C:\\Projects\\Line.ap21");
+        var identity = new WorkerSessionIdentity
+        {
+            WorkerSessionId = "worker-a",
+            SessionGeneration = 7,
+            PortalProcessId = 4242,
+            ProjectPath = "C:/Projects/Line.ap21"
+        };
+
+        Assert.True(binding.TryPromoteConfigured(identity, out var firstError));
+        var afterFirstPromotion = binding.CaptureSnapshot();
+
+        Assert.True(binding.TryPromoteConfigured(identity, out var secondError));
+        var afterSecondPromotion = binding.CaptureSnapshot();
+
+        Assert.Null(firstError);
+        Assert.Null(secondError);
+        Assert.True(afterSecondPromotion.IsVerified);
+        Assert.True(afterFirstPromotion.SameBinding(afterSecondPromotion));
+    }
+
+    [Fact]
+    public void TryInvalidate_WithAStaleSnapshot_DoesNotInvalidateANewerRebind()
+    {
+        var binding = new ProjectSessionBinding(null);
+        Assert.True(binding.BindVerified(
+            new WorkerSessionIdentity
+            {
+                WorkerSessionId = "worker-a",
+                SessionGeneration = 1,
+                PortalProcessId = 4242,
+                ProjectPath = "C:\\Projects\\A.ap21"
+            },
+            forceRebind: false,
+            out _));
+        var stale = binding.CaptureSnapshot();
+
+        Assert.True(binding.BindVerified(
+            new WorkerSessionIdentity
+            {
+                WorkerSessionId = "worker-b",
+                SessionGeneration = 1,
+                PortalProcessId = 4343,
+                ProjectPath = "C:\\Projects\\B.ap21"
+            },
+            forceRebind: true,
+            out _));
+        var rebound = binding.CaptureSnapshot();
+
+        Assert.False(binding.TryInvalidate(stale, "late response from project A"));
+
+        var afterLateResponse = binding.CaptureSnapshot();
+        Assert.True(afterLateResponse.IsVerified);
+        Assert.True(rebound.SameBinding(afterLateResponse));
+        Assert.Equal("C:\\Projects\\B.ap21", afterLateResponse.ProjectPath);
+        Assert.Equal("worker-b", afterLateResponse.WorkerSessionId);
+    }
+}

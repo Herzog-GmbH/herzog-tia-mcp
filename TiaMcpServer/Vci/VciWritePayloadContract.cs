@@ -1,0 +1,67 @@
+using System.Text.Json;
+using TiaMcpServer.Contracts.Vci;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.Json;
+using TiaMcpServer.OperationBatches;
+using TiaMcpServer.Worker;
+
+namespace TiaMcpServer.Vci;
+
+public static class VciWritePayloadContract
+{
+    internal static void ValidateEnvelopeOutcome(JsonElement envelope)
+    {
+        if (envelope.ValueKind != JsonValueKind.Object) return;
+        var members = envelope.EnumerateObject()
+            .Where(p => string.Equals(p.Name, "vciWriteOutcome", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (members.Length == 0) return;
+        // The envelope is legacy case-insensitive; never validate a different outcome than it decodes.
+        if (members.Length != 1 || members[0].Name != "vciWriteOutcome") throw new JsonException();
+        Validate(CanonicalJson.DeserializeWorkerPayload<VciWriteOutcomeInfo>(members[0].Value.GetRawText()));
+    }
+
+    public static StructuredOperationItem Project(VciOperationRequest item, WorkerCallResult result)
+    {
+        try
+        {
+            var outcome = result.Success ? CanonicalJson.DeserializeWorkerPayload<VciWriteOutcomeInfo>(result.Payload) : result.VciWriteOutcome;
+            if (outcome is not null) Validate(outcome);
+            var failed = !result.Success || outcome!.Failed > 0;
+            if (outcome is null)
+                return StructuredOperationItem.Failed(item, result.FailureCategory ?? WorkerFailureCategories.WorkerOperationFailed,
+                    result.Error ?? "One or more VCI leaves failed.", result.Warnings);
+            return new(item.OperationId, item.Operation, failed ? OperationBatchStatus.Failed : OperationBatchStatus.Succeeded,
+                CanonicalJson.ToElement(outcome),
+                failed ? new(result.FailureCategory ?? WorkerFailureCategories.WorkerOperationFailed, result.Error ?? "One or more VCI leaves failed.") : null,
+                null, null, result.Warnings);
+        }
+        catch (JsonException)
+        {
+            return StructuredOperationItem.Failed(item, WorkerFailureCategories.ProtocolError,
+                "The VCI worker outcome did not match its declared result contract and was rejected.", result.Warnings);
+        }
+    }
+
+    internal static void Validate(VciWriteOutcomeInfo outcome)
+    {
+        if (outcome.Skipped is not { } s || outcome.Notes is null || outcome.Notes.Any(n => n is null)
+            || new[] { outcome.Leaves, outcome.Succeeded, outcome.Failed, outcome.FormatFallbacks, s.Equal, s.AlreadyMapped, s.Conflict, s.TargetChanged }.Any(n => n < 0)
+            || outcome.FormatFallbacks > outcome.Leaves)
+            throw new JsonException();
+        if (outcome.LastAttempted is { } last && (last.Path is null || last.Path.Count == 0
+            || last.Path.Any(p => p is null || string.IsNullOrWhiteSpace(p.NodeType) || string.IsNullOrWhiteSpace(p.Name))
+            || string.IsNullOrWhiteSpace(last.Operation))) throw new JsonException();
+        if (outcome.Failures is not { } failures || failures.Count > VciWriteOutcomeInfo.MaxFailures || failures.Any(f => !IsValid(f))
+            || outcome.FailuresOmitted < 0 || failures.Count + outcome.FailuresOmitted > outcome.Failed)
+            throw new JsonException();
+    }
+
+    private static bool IsValid(VciLeafFailureInfo? f)
+        => f is { Path: { Count: > 0 } path, Message: { } message }
+           && path.All(p => p is not null && !string.IsNullOrWhiteSpace(p.NodeType) && !string.IsNullOrWhiteSpace(p.Name))
+           && (f.Format is null || !string.IsNullOrWhiteSpace(f.Format))
+           && (f.EngineeringErrorType is null || !string.IsNullOrWhiteSpace(f.EngineeringErrorType))
+           && (f.Category == WorkerFailureCategories.EngineeringRejected && f.EngineeringErrorType is not null
+               || f.Category == WorkerFailureCategories.WorkerOperationFailed)
+           && message.Length <= VciLeafFailureInfo.MaxMessageChars;
+}

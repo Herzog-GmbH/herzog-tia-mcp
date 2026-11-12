@@ -1,0 +1,234 @@
+# TIA Portal MCP server
+
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Czarnak/tia-portal-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/Czarnak/tia-portal-mcp/actions)
+[![Codecov](https://img.shields.io/codecov/c/github/Czarnak/tia-portal-mcp?style=flat-square)](https://codecov.io/gh/Czarnak/tia-portal-mcp)
+[![GitHub Release](https://img.shields.io/github/v/release/Czarnak/tia-portal-mcp?style=flat-square)](https://github.com/Czarnak/tia-portal-mcp/releases)
+[![.NET SDK](https://img.shields.io/badge/.NET-10.0-512BD4.svg?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
+[![.NET Framework](https://img.shields.io/badge/.NET_Framework-4.8-512BD4.svg?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
+[![TIA Portal](https://img.shields.io/badge/TIA_Portal-V21-009999.svg?style=flat-square&logo=siemens)](https://new.siemens.com/global/en/products/automation/industry-software/automation-software/tia-portal.html)
+[![MCP](https://img.shields.io/badge/MCP-Ready-000000.svg?style=flat-square)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://github.com/Czarnak/tia-portal-mcp/blob/main/LICENSE)
+![NuGet Downloads](https://img.shields.io/nuget/dt/TiaMcpServer)
+
+MCP server for Siemens SIMATIC TIA Portal V21. It lets MCP clients and AI agents inspect a running TIA Portal project through the Siemens Openness API.
+
+The current implementation covers project discovery and lifecycle operations, PLC block export/import, tag table reads, guarded PLC software writes, hardware/network discovery, WinCC Unified HMI inspection and guarded tag-table/tag/alarm writes, standalone VCI workspace operations, cross-reference diagnostics, hardware catalog search, guarded network-device provisioning, and compile/check diagnostics.
+
+## Tools
+
+The server exposes 8 tools in `read-only`, 19 in `read-write` (the startup default), and the same 19 in `full`.
+`read-write` permits in-project edits, compilation and project lifecycle calls, asking once per actual lifecycle call.
+`full` adds no tools or operations; it only runs lifecycle calls without the prompt. Every write tool
+(`plc_write`, `network_write`, `hmi_write`, `vci_write` and the six lifecycle tools) uses one guarded single-call pipeline; there are no
+safety tokens and no PLC run/stop.
+
+### PLC reads and cross-references
+
+- `plc_read` - run up to 50 PLC read operations in one call: `get_block_content`, `get_type_content` and `list_tag_tables`. Each item carries a unique `operationId`, an `operation` name, and that operation's parameters. Items run independently, so a failing item does not stop the others. Results are structured JSON with `contractVersion` `1.0`; a value over the value budget (60,000 characters by default) is omitted whole with narrowing guidance, never cut.
+- `read_cross_references` - read the cross-references of one project-tree target (a block, type, tag, constant, or a PLC, software unit or folder swept over every owner beneath it). Arguments: `target`, `filter`, `maxResults`. Both reads are available in every access mode and act on the bound project only; they never open or switch a project, and without a verified binding they fail closed with `binding_conflict` (call `bind_project` first).
+
+### HMI reads and writes
+
+- `hmi_read` - run up to 50 read-only WinCC Unified HMI operations in one call (devices, tags, connections, alarms, logs, screens and items, faceplates, navigation, runtime settings, script modules, text and graphic lists, languages and `validate`). Registered in every access mode, paged with `offset`/`limit` (default 100), structured JSON with `contractVersion` `1.1`. Classic WinCC devices are listed but not read. See the [HMI operations summary](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/HMI_OPERATIONS_SUMMARY.md).
+- `hmi_write(operations, dryRun=false)` - create, update or delete WinCC Unified tag tables, tags and discrete/analog alarms: nine operations in read-write/full, up to 50 caller-ordered items on one verified standalone project or local session, with write contract `2.0`. Set `dryRun:true` for preview; execution stops at the first failure without batch rollback or server elicitation. `EngineeringTargetInvocationException` during mutation is `engineering_rejected` unless `portal_lost` takes precedence. Typed Siemens failures carry `engineeringError` except for `portal_lost`; partial outcomes are conditional on writer allocation. Inspect actual state, run public `validate` and compile the HMI device in TIA Portal after writes. The [HMI reference](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/HMI_OPERATIONS_SUMMARY.md#writes-hmi_write) documents fields, three guards and shared verification; the [qualification record](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md) records completed qualification within the recorded R1/R2/R3 scope.
+
+### Version Control Interface
+
+- `vci_read` - inspect standalone-project workspaces, paged mappings, optional raw status and supported leaf formats in every mode.
+- `vci_write(operations, dryRun=false)` - create/delete workspaces, export leaf scopes, sync in either direction and delete mappings in read-write/full. It executes by default, previews with `dryRun:true`, and stops after the first failed item without rollback across items or server elicitation. Save the project to persist workspaces and mappings; inspect current state before retrying. The [VCI reference](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/VCI_OPERATIONS_SUMMARY.md) gives formats, path guards, sync decisions, Portal-loss recovery and scoped acceptance limits.
+
+### PLC writes
+
+- `plc_write(operations, dryRun=false)` - run up to 50 PLC software writes in caller order against one verified, already-open project. Operations: `update_block_logic`, `update_type_content`, `create_block` / `delete_block`, `create_block_group` / `delete_block_group`, `create_tag_table` / `delete_tag_table`, `create_tag` / `update_tag` / `delete_tag`, `create_user_constant` / `update_user_constant` / `delete_user_constant`. Set `dryRun:true` to preview effects and guards without mutation. No confirmation prompt is sent in any mode. Phases are `preview`, `applied`, `blocked` and `error`. Execution stops at the first failure and never rolls back, so re-read with `plc_read` before retrying. Later items may use objects created earlier in the same call. Creates are not collision-checked before mutation. Scoped live cases demonstrated duplicate tag, table, block and group rejections, the default-table delete rejection, and four additional namespace directions; this is not a guarantee for every collision. Native `EngineeringTargetInvocationException` failures in mutation worker methods become `engineering_rejected` with the exception type, bounded message and inner chain in `engineeringError` (Portal UI language). Guards cover delete consequences, address overlap and unreadable evidence; the singleton-OB check is retained because native redundancy was not demonstrated. Verification reads back content only (`contentHash`), `trusted` otherwise (write contract `2.0`); see the [PLC operations reference](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/PLC_OPERATIONS_SUMMARY.md#failures-from-tia-portal).
+
+Content writes (`update_block_logic`, `update_type_content`) take the document as `content` together with `expectedContentHash`, the `contentHash` from a `plc_read` of the same object in the same format. Content changed since that read is rejected with `state_changed`. A document over the value budget is omitted from the read, has no hash, and cannot be updated through `plc_write`; the budgets default to 60,000 characters per value and 180,000 per response and can be raised at startup with `--max-item-chars`/`--max-document-chars` (see [response size limits](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/guides/mcp-client-configuration.md#response-size-limits)). `preview_write_batch`, `apply_write_batch` and `execute_read_batch` were retired; their operations moved to `plc_write` and `plc_read`.
+
+Every operation result may carry a `warnings` array — non-fatal degradation notes captured from the TIA Openness worker. A populated `warnings` array means the payload may be partial.
+
+Available `plc_read` operations: `get_block_content`, `get_type_content`, and `list_tag_tables`.
+
+`get_block_content` / `update_block_logic` and `get_type_content` / `update_type_content` accept a `format` field. `format=source` is available for global data blocks, PLC data types, and SCL-language FB/FC/OB. Every other block language stays on `format=xml`.
+
+`withDependencies` (`plc_read` only, default `false`) asks TIA Portal to include the object's dependency closure. The resulting document declares several objects and is **context only** — a write refuses any source declaring more than one object, and the read carries a warning saying so. Omit the field to get a document you can edit and submit back.
+
+`get_block_content` and `get_type_content` reads also return a `contentHash` (`xml:sha256:<hex>` or `source:sha256:<hex>`) computed over the exact text served in `result`, tagged with the served format. It lets a later guarded write detect that the document changed since it was read. It is omitted for `withDependencies` reads, failed reads, and results truncated or omitted for size.
+
+### Network operations
+
+`network_read` and `network_write` both declare an MCP output schema and return one canonical JSON document identically as the `content` text block and as `structuredContent` — never a nested JSON string inside an outer envelope. Both use contract version `1.0`, root warnings arrays and explicit nulls; see [docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md) for the exact envelopes.
+
+- `network_read` - run up to 50 dedicated network reads: `read_hardware_config`, `search_equipment_catalog`, `list_network_objects`, and `inspect_network_object`. Reads run independently. Bound catalog searches with `query` and `maxResults`; `read_hardware_config` accepts an optional `deviceName` filter, an optional `plcName` for tag matching, and opt-in structured I/O extraction (`includeIoDetails` for addresses and channels, `includeTagMatches` for exact PLC tag matches per channel). Detailed I/O output can be large, so filter by `deviceName` or split into separate calls.
+- `network_write` - preview or apply up to 50 dedicated network writes: `add_network_device` (flat `typeIdentifier`/`deviceName`, since it names something that does not exist yet), `configure_network_device` (nested `target: { deviceName, nodeId }` plus `changes: { ipAddress?, subnetMask?, pnDeviceNameAutoGeneration?, pnDeviceName?, subnet?: { subnetId }, ioSystem?: { subnetId, number } }` — a null `changes` member means leave that setting unchanged), `create_subnet` (`subnet: { name, networkType }`, plus PROFIBUS-only `highestAddress`/`transmissionSpeed`), `update_subnet` (`target: { kind: "subnet", subnetId }` plus `subnetChanges` with at least one member), and `delete_subnet` (`target: { kind: "subnet", subnetId }` — connected or not). Set `dryRun:true` to preview. `dryRun:false` or omitting `dryRun` executes, with no server Network elicitation in read-write/full. Legacy `confirm`, `acknowledge`, unknown roots and nonboolean `dryRun` are rejected before tool entry. Writes require a verified binding to the exact already-open project. Apply is sequential, stops on the first failure, marks later items skipped, and does not roll back completed writes: `network_write` attaches an explicit warning to the failed item that this operation and any earlier operation in the same call may already have changed TIA state, and that you should re-read with `network_read` before retrying rather than blindly re-running the batch.
+
+`configure_network_device` selects one exact device/node and exact subnet/IO tuple, with no first-match fallback. Applied settings receive immediate and final effective-prefix checks; unreadable evidence cannot pass. Requested skips fail the item while retaining sparse typed results. Connected subnet deletion is informational; incomplete consequence inventory blocks every mode. Results use `phase:applied` even when execution or verification fails (`error:null`, MCP `isError:false`). Inspect current state before retrying; output omission may report delivery `success:false` while actual execution summaries remain successful. See the [Network contract](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md#network_write-envelope) for guards, sparse results, and whole-value omission recovery.
+
+`read_hardware_config` additionally reports unreadable members in a payload-level `messages` array; device/module name and type-identifier fields omit values that could not be read instead of returning `0`/empty-string placeholders (a few secondary name fields still fall back to an empty string, with the failure noted in `messages`). Hardware configuration data is engineering evidence, not certification that a physical installation has been commissioned.
+
+`read_hardware_config` supports opt-in structured I/O extraction. With `includeIoDetails: true`, each device item carries an `ioDetails` object with `addresses[]` (Openness `Address` evidence: `ioType`, byte-based `startAddress`, `length`, dynamic `context`, and ordinal `controllerNames`) and `channels[]` (`number`, `ioType`, `type`, bit-based `channelAddressBits`, `channelWidthBits`, and a formatted `logicalAddress` such as `%I4.0`/`%IW64` emitted only when the evidence is present and aligned). With `includeTagMatches: true` (which requires `includeIoDetails`), each channel carries `tagMatches[]` resolved deterministically against one selected PLC's tag tables — `plcName` selects the PLC by exact name, otherwise tag matching applies only when exactly one PLC exists. A tag matches a channel only when its normalized absolute I/O interval is identical to the channel's, and tags are never matched across controllers. A default read (no flags) returns no `ioDetails`; the current envelope and additive evidence follow the declared Network contract. See [docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md) for the exact request/response shapes and unit semantics.
+
+Large hardware reads can opt into cursor pagination with `pageSize` (`1..200`) or `cursor`. Pages count devices first and then subnets in one stable sequence while keeping the two public arrays separate; canonical size projection may return fewer complete entities than requested. Follow `pagination.nextCursor` until it is absent/null and keep the project, filters, and detail flags unchanged. Requests with neither field use the unpaged path under the current declared contract. Cursors are process-local and cannot survive a host restart. See the [Network operations reference](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md#hardware-configuration-pagination) for recovery and omission semantics.
+
+### Project tools
+
+- `bind_project` — default `bind` adopts an already-open project in any mode; omit the path to adopt the sole open project or list candidates. Use `forceRebind:true` to switch. Explicit `list_portals` discovers without adoption; five Project Server inventory actions inspect the persistent attached instance without changing project binding. Reattachment may show TIA's human-answerable Openness access dialog. See [Multiuser inventory and acceptance limits](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/MULTIUSER_OPERATIONS_SUMMARY.md).
+- `get_project_status` — inspect active project metadata without opening, binding, or switching projects; it takes no arguments.
+- `browse_project_tree` — browse a canonical, paged v3 point-in-time project-tree snapshot with optional typed PLC block header author, version, family, and header-name metadata in block-node `details` (default-on string fields: `HeaderAuthor`, `HeaderVersion`, `HeaderFamily`, and `HeaderName`), typed `startSelector`, `depth`, and `pageSize`; continue with the returned opaque `cursor`.
+- `compile_check` — compile a PLC or selected block and return compiler messages; available in read-write and full modes.
+- `open_project` / `create_project` / `save_project` / `save_project_as` / `archive_project` / `close_project` - guarded single-call lifecycle writes in read-write and full. Read-write asks once per actual call; full proceeds without server elicitation. Set `dryRun:true` to inspect effects and guards without mutation or elicitation. These tools advertise structured outputs and accept no public confirmation list or safety token; they remain single-tool only.
+
+Local sessions use the observed typed `.amc21` path for adoption, basic status and already-open
+startup assertions; writable `open_project` accepts an exact existing `.als21` file. Content reads
+(`browse_project_tree`, `plc_read`, `network_read`, `read_cross_references`, `hmi_read`) work on a
+bound local session, and so do `plc_write`, `network_write`, `hmi_write`, `compile_check` and `save_project`.
+A local `save_project` saves the session through `LocalSession.Save()` and never checks in to the
+Project Server; create, save-as, archive, close and other terminal operations remain unavailable.
+Scoped PR4 acceptance includes online
+retained-Portal recovery and UI-assisted offline read-write opening; the tested offline opens
+required Siemens dialog dismissal. See [local-session support and limits](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/MULTIUSER_OPERATIONS_SUMMARY.md).
+
+`get_project_status` and `compile_check` advertise structured output schemas with contract version `1.0`. Their text and `structuredContent` contain the same canonical document; read the typed payload at `result.value`. Compiler errors set `success:false` while retaining diagnostics, with MCP `isError:false`. Oversized values are omitted whole with retry guidance. See the [standalone response contract](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/PROJECT_OPERATIONS_SUMMARY.md#standalone-status-and-compilation-contract) for migration details.
+
+Project-tree callers must use `v3.0.0` or newer: the v2 `startPath` input and bare nested-array response were removed rather than retained as aliases. See the [project operations reference](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/PROJECT_OPERATIONS_SUMMARY.md#browse_project_tree-v3) for the migration request, complete response envelope, selector reconstruction, continuation, limits, and recovery behavior.
+
+## Write safety
+
+Every write tool validates input, prepares the exact binding, resolves targets, evaluates guards,
+mutates, verifies, and audits in one call. `plc_write`, `network_write`, `hmi_write` and `vci_write` register only block and
+info guards, so they never prompt. On every write tool `dryRun:true` returns `phase:preview`
+without mutation or a confirmation prompt. In read-write every actual lifecycle call requires one form elicitation
+with explicit acceptance and boolean `confirm:true`, including calls with only info guards or no
+guards. Unsupported clients, decline, cancel, timeout, or transport failure deny with `access_denied`.
+Full mode satisfies acknowledge guards by policy without server elicitation. Block guards stop the
+call in every mode. Confirmation follows the access mode; the old startup switch was removed.
+See the [lifecycle reference](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/PROJECT_OPERATIONS_SUMMARY.md#lifecycle-operations)
+for guards, requests, responses, and recovery.
+
+**Consent depends on the MCP client.** Elicitation proves that the client returned an accepted
+answer, not that a person saw it. Project mutation and lifecycle tools retain conservative destructive hints; keep them
+out of client auto-approve lists if you want permission prompts on every call. `plc_write`,
+`network_write`, `hmi_write` and `vci_write` use `dryRun:true` for preview and execute by default, with no token and no server
+elicitation. Client permission prompts remain independent.
+
+Lifecycle uses pinned binding and transition checks;
+open/create can start unbound, save-as binds the resulting copy, and close clears the binding.
+Lifecycle audits every call, including dry runs and refusals, in `writes-yyyy-MM-dd.jsonl` under
+`%LOCALAPPDATA%\TiaMcpServer\audit`; audit v2 records confirmation by `user`, `policy`, or `none`.
+`plc_write`, `network_write`, `hmi_write` and `vci_write` also record one audit v2 per entered call, including previews and denials, with confirmation `none` in read-write and `policy` in full; SDK argument rejection before entry has no write audit. The legacy write audit stream was retired.
+
+The worker never attaches to the first enumerated TIA Portal or selects the first open project. It
+requires an exact path match or a genuinely sole candidate; multiple possible targets fail with
+`target_ambiguous` before Attach or mutation. The server refuses to start when `--project` or
+`TIA_MCP_PROJECT_PATH` is not an absolute `.ap21` or `.amc21` path. A configured `--project` path
+becomes write-ready only after a matching worker identity is observed. Later identity drift returns `binding_conflict` and
+invalidates the session until an explicit rebind.
+
+There are no implicit opens: only `open_project` and `create_project` open a project. Use
+`bind_project` for an already-open project. Worker ownership is lost across a detach; a reattached
+project is treated as UI-owned. Read-only never opens, creates, saves or closes a project, while
+explicit binding may switch the selected session. Project-tree cursors reject binding changes,
+including a switch away and back to the same path.
+
+`plc_write`, `network_write`, `hmi_write` and `vci_write` pin one verified project binding through planning, ordered mutation, verification and audit, so a concurrent rebind cannot redirect a planned write. Network and HMI do not re-plan per item or perform worker read-back. HMI plans from one initial public-read evidence set per HMI; those reads are sequential and non-atomic. Both domains record completed items as `trusted` or `superseded`. `plc_write` blocks name collisions, `create_block` on an existing block, deleting the default tag table, and unreadable evidence before anything runs; deletes and address overlaps are reported as info.
+
+Lifecycle rejection has top-level `{category,message}` `error` and MCP `isError:true`. An attempted
+write or verification failure instead has `success:false`, `error:null`, and `isError:false`, with
+typed failure evidence in `result` or `verification`. A mutation may have succeeded despite failed
+verification; inspect state before retrying.
+`save_project_as` still requires `rebind:true`, and warnings stay separate from success/failure.
+
+Lifecycle's removed inputs and structured outputs are breaking changes staged for the redesign's
+final major release. The Network and PLC migrations are implemented, and the safety-token core and the
+generic batch tools are retired. This step does not publish a package.
+
+## Architecture
+
+TIA Portal V21 ships its Openness API as .NET Framework 4.8 assemblies. Those assemblies use .NET Framework remoting APIs that cannot run correctly inside a .NET 10 process.
+
+This project therefore uses two processes:
+
+- `TiaMcpServer` - the .NET 10 MCP stdio server and .NET global tool host.
+- `TiaMcpServer.OpennessWorker` - a .NET Framework 4.8 worker process that loads `Siemens.Engineering.*` and talks to TIA Portal.
+
+The MCP host keeps one persistent .NET Framework 4.8 worker process attached to TIA Portal and exchanges newline-delimited JSON over stdin/stdout. Requests are serialized, and the worker restarts automatically after a crash or timeout. Siemens DLLs are never copied into this repository or the NuGet package; the worker resolves them from the local TIA Portal V21 installation.
+
+
+## Quick start
+
+Install the server as a .NET global tool, check your environment, and register it with an MCP client:
+
+```powershell
+dotnet tool install -g TiaMcpServer
+tia-mcp doctor
+tia-mcp install claude-code
+```
+
+`tia-mcp doctor` validates Windows version, .NET runtimes, the TIA Portal installation, Openness
+assemblies, user-group membership, and host/worker compatibility before you connect anything. Run it
+first — it reports exactly which prerequisite is missing.
+
+| Prerequisite | Notes |
+| --- | --- |
+| Windows | Windows-only; the Openness API has no other host |
+| Siemens TIA Portal V21 | with Openness installed and enabled |
+| `Siemens TIA Openness` group | the current Windows user must be a member |
+| Framework-dependent global tool: stable .NET 10 SDK 10.0.400 or newer | provides `dotnet tool install` and the supported .NET 10 runtime |
+| .NET Framework 4.8 runtime | required by the Openness worker process |
+
+The framework-dependent `tia-mcp` global tool requires a supported .NET 10 runtime. The separate
+self-contained `win-x64` archive includes the host runtime. Neither installation method requires
+users to install the `ModelContextProtocol` NuGet package.
+
+Custom .NET integrations that compile directly against the C# MCP SDK must review the
+ModelContextProtocol 2.2 migration notes and retest protocol negotiation, tool schemas, and
+structured results. This custom-integration requirement is separate from the `browse_project_tree`
+v3 migration described above.
+
+Supported clients for `tia-mcp install`: Claude Code, Codex, OpenCode, MiMoCode. Servers register in
+**read-only** mode by default (eight tools); add `--access-mode read-write` for edits, compilation,
+and lifecycle with one prompt per actual call (nineteen tools). Select `--access-mode full` for
+lifecycle without server elicitation (the same nineteen tools).
+
+Binding to a specific project, every install option, and the full access-mode reference are in the
+[installation guide](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/guides/installation.md). To build from source instead of installing
+the published tool, see [building from source](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/development/building.md).
+
+## Documentation
+
+**Using the server**
+
+- [Installation](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/guides/installation.md) — install, verify with `doctor`, register with a client, access modes
+- [MCP client configuration](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/guides/mcp-client-configuration.md) — client config reference, block path addressing and response size limits
+- [Troubleshooting](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/guides/troubleshooting.md) — common failures and verified TIA Portal V21 behavior
+- [Supported operations](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/SupportedOperations/README.md) — every operation by area, with parameters
+
+**Understanding the design**
+
+- [Architecture](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/ARCHITECTURE.md) — two-process topology, access enforcement, write safety, the canonical JSON seam
+
+**Building and contributing**
+
+- [Contributing](https://github.com/Czarnak/tia-portal-mcp/blob/main/CONTRIBUTING.md) — workflow, branch and commit conventions
+- [Building from source](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/development/building.md) — build, test, coverage, run locally
+- [Local MCP sandbox testing](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/development/local-mcp-testing.md) — the MCP Inspector test loop
+- [Packaging](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/development/packaging.md) — build the package, install a local build as `tia-mcp`
+
+**Direction**
+
+- [Roadmap](https://github.com/Czarnak/tia-portal-mcp/blob/main/ROADMAP.md) — directional priorities
+- [Network operations roadmap](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/roadmap/network-operations.md) — phased network tool delivery
+- [Export/import format roadmap](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/roadmap/export-import-format.md) — source-format exchange
+- [JSON contract roadmap](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/roadmap/json-contract.md) — one structured output contract across the tools
+- [Improvement log](https://github.com/Czarnak/tia-portal-mcp/blob/main/docs/IMPROVEMENT_LOG.md) — open follow-ups and completed engineering work
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](https://github.com/Czarnak/tia-portal-mcp/blob/main/CONTRIBUTING.md) for the development workflow and how to set up your environment. For architecture and build reference, see [AGENTS.md](https://github.com/Czarnak/tia-portal-mcp/blob/main/AGENTS.md).
+
+## Security
+
+For how to report security vulnerabilities, see [SECURITY.md](https://github.com/Czarnak/tia-portal-mcp/blob/main/SECURITY.md).
+
+## Check other tools
+
+- [TIA Portal V21 Git Add-In](https://github.com/Czarnak/tia-git-addin)
+- [Claude Code / Codex / Gemini plugin for TIA Portal development](https://github.com/Czarnak/totally-integrated-claude)

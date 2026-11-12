@@ -1,0 +1,72 @@
+using System.ComponentModel;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using TiaMcpServer.OperationBatches;
+using TiaMcpServer.Tools;
+using TiaMcpServer.Worker;
+
+namespace TiaMcpServer.Network;
+
+[McpServerToolType]
+public class NetworkReadTools
+{
+    private const string ToolName = "network_read";
+
+    [McpServerTool(
+        Name = ToolName,
+        ReadOnly = true,
+        Destructive = false,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(OperationBatchReadResponse))]
+    [Description("Run up to 50 dedicated network read operations in one call. Valid operations: read_hardware_config, search_equipment_catalog (query), list_network_objects (objectKinds), and inspect_network_object (target). Reads run independently, so a failing item does not stop later operations. Each operation result is returned as declared JSON, not as a nested JSON string. Large catalog searches can be narrowed with query/maxResults or split into separate network_read calls. list_network_objects uses pageSize (1..200), default 100 on every page. read_hardware_config accepts optional deviceName (case-insensitive station/root device name as in devices[].name, not a PLC/CPU device-item name), plcName (PLC software name, used only for tag matching), includeIoDetails (structured addresses and channels), and includeTagMatches (requires includeIoDetails). For bounded hardware pagination, supply pageSize (1..200) or cursor; cursor alone defaults to 100. Page size counts one combined sequence, devices first, then subnets, while the result keeps separate arrays. On continuation, deviceName, plcName, includeIoDetails, and includeTagMatches must remain unchanged. Detailed output can be large, so filter by deviceName or split into separate calls.")]
+    public static Task<CallToolResult> NetworkRead(
+        OpennessWorkerClient workerClient,
+        NetworkReadOperationExecutor operationExecutor,
+        [Description("Ordered list of dedicated network read operations. Each item is { operationId, operation, ...operation parameters }.")] NetworkOperationRequest[] operations,
+        CancellationToken cancellationToken = default)
+        => BatchReadTool.RunAsync(workerClient, operations, ToolName, NetworkContractVersion.Current,
+            items => NetworkOperationCatalog.ValidateRead(items, workerClient?.AccessPolicy.Mode), NetworkOperationCatalog.ValidateAccessMode,
+            operationExecutor.ExecuteAsync,
+            RetryGuidance, cancellationToken);
+
+    /// <summary>
+    /// Bounds a batch against the exact <c>network_read</c> response document. Internal so tests can
+    /// drive the real wiring — retry tool, per-operation guidance, envelope — at small limits.
+    /// </summary>
+    internal static StructuredOperationBatch ApplyBudget(
+        StructuredOperationBatch batch,
+        int? maxItemChars = null,
+        int? maxDocumentChars = null)
+        => BatchReadTool.ApplyBudget(batch, ToolName, NetworkContractVersion.Current,
+            RetryGuidance, maxItemChars, maxDocumentChars);
+
+    private static string RetryGuidance(StructuredOperationItem item) => item.Operation switch
+    {
+        // A catalog search has its own narrowing knobs, so recommend those before a re-split.
+        "search_equipment_catalog" =>
+            "Narrow query or maxResults, or split the batch: re-run this operationId in its own "
+                + $"{ToolName} call.",
+
+        "read_hardware_config" when IsHardwarePage(item) => HardwarePageProjector.RetryGuidance,
+
+        "read_hardware_config" =>
+            "Narrow with deviceName and disable includeIoDetails/includeTagMatches where possible, "
+                + "or split the batch: re-run this operationId in its own "
+                + $"{ToolName} call.",
+
+        "inspect_network_object" =>
+            "Request fewer attributeNames, or split the batch: re-run this operationId in its own "
+                + $"{ToolName} call.",
+
+        _ => $"Split the batch: re-run this operationId in its own {ToolName} call.",
+    };
+
+    private static bool IsHardwarePage(StructuredOperationItem item)
+        => item.Result is { ValueKind: System.Text.Json.JsonValueKind.Object } result
+            && result.TryGetProperty("pagination", out var pagination)
+            && pagination.ValueKind == System.Text.Json.JsonValueKind.Object;
+
+    internal static CallToolResult Error(string category, string message)
+        => BatchReadTool.Error(ToolName, NetworkContractVersion.Current, category, message);
+}

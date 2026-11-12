@@ -1,0 +1,55 @@
+# Security Policy
+
+MCP server for Siemens TIA Portal V21, exposing Openness API operations through an MCP interface.
+
+## Supported Versions
+
+Only the latest release of this repository receives security fixes. Releases are published as a zip file on the GitHub releases page; there is no NuGet package.
+
+## Reporting a Vulnerability
+
+Do not file security vulnerabilities as public GitHub Issues. Instead, use GitHub's private vulnerability reporting:
+
+1. Open the **Security** tab of this repository.
+2. Click "Report a vulnerability".
+3. Provide:
+   - Description of the vulnerability
+   - Steps to reproduce (if applicable)
+   - Potential impact
+   - Affected version
+
+Reports will be acknowledged and triaged as soon as possible. This project does not currently maintain a fixed SLA; response times depend on severity and availability.
+
+## Security Considerations
+
+### Local stdio transport
+
+The MCP server communicates over local stdio only. It does not listen on a network port and cannot be accessed remotely. Access is controlled by the invoking process and the Windows user running the tool.
+
+### Operating system integration
+
+The tool requires:
+- The invoking user to be a member of the Windows `Siemens TIA Openness` user group.
+- TIA Portal V21 to be running with a project open.
+
+Access control is inherited from the TIA Portal installation's OS-level permissions rather than implemented separately in this tool. Authorization failures at the OS level will block the tool.
+
+### Write safety
+
+Every write tool uses a guarded single call under one pinned, verified project binding; no tool uses safety tokens. `plc_write` and `network_write` preview with `dryRun:true`, execute by default, and never elicit; block guards (collisions, unreadable evidence) refuse in every mode. Stale content in a `plc_write` content update fails with `state_changed`.
+
+Lifecycle writes use a guarded single call: read-write requires one client confirmation form per actual call; full proceeds under policy without server elicitation. Block guards refuse in every mode, and dry runs never mutate or elicit. Lifecycle, Network and PLC audit v2 records every entered call, including previews and refusals, with confirmation by `user`, `policy`, or `none`. Client-returned acceptance cannot prove that a human saw a prompt. See the README's "Write safety" section for details.
+
+Write calls append audit JSONL records under `%LOCALAPPDATA%\TiaMcpServer\audit` for forensic review.
+
+### Supply chain
+
+Siemens Openness DLLs (`Siemens.Engineering*.dll`) are never committed to this repository or included in a release. They are loaded from the local TIA Portal V21 installation at runtime. `ref/` holds only generated compile-time stubs. A release contains only the MCP host, the net48 worker, `TiaHmiMcp.exe` and open-source dependencies.
+
+### Trust boundary
+
+The MCP server exposes read and write operations on live TIA Portal projects. Because the tool can inspect and modify automation code and hardware configuration:
+
+- **Do not point MCP clients or AI agents at production projects** without explicit review. Use disposable or backed-up copies of `.ap21` projects for development and testing.
+- Treat MCP client configuration and any AI agent driving the client as part of your security trust boundary.
+- Review project-writing AI prompts before execution against shared or critical projects.

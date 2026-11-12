@@ -1,0 +1,28 @@
+namespace TiaMcpServer.Contracts.Safety;
+
+/// <summary>
+/// Immutable access mode for the MCP server process. Resolved once at startup and cannot
+/// be changed at runtime. Read-write permits in-project edits, compile and explicit project
+/// lifecycle with confirmation for each lifecycle call; full permits the same operations and
+/// runs lifecycle calls directly by policy.
+/// </summary>
+public enum McpAccessMode
+{
+    /// <summary>Observation and selection of already-open projects are allowed. This mode
+    /// never opens, creates, saves or closes a project. Write tools are not exposed and
+    /// prohibited operations are rejected before reaching the worker.</summary>
+    ReadOnly,
+
+    /// <summary>Observation, in-project edits, compile and project lifecycle with user confirmation.</summary>
+    ReadWrite,
+
+    /// <summary>The same operations as read-write; lifecycle runs without confirmation.</summary>
+    Full,
+
+    /// <summary>
+    /// Production profile: reads, PLC edits, compile, project lifecycle and undo, with no confirmation.
+    /// Network and version-control writes are refused by host and worker.
+    /// PLC writes run with snapshots, read-back comparison and automatic rollback.
+    /// </summary>
+    Produktiv
+}

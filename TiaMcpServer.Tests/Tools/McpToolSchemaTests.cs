@@ -1,0 +1,497 @@
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.AI;
+using ModelContextProtocol.Client;
+using ModelContextProtocol.Server;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Tests.TestSupport;
+using TiaMcpServer.Cursors;
+using TiaMcpServer.Network;
+using TiaMcpServer.ProjectLifecycle;
+using TiaMcpServer.ProjectTree;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Tools;
+using TiaMcpServer.Worker;
+using Xunit;
+
+namespace TiaMcpServer.Tests.Tools;
+
+/// <summary>
+/// Verifies the MCP input schema the SDK actually generates for the write tools never exposes
+/// the DI-injected <c>workerClient</c> parameter as model-supplied arguments.
+///
+/// Those tools declare <c>OpennessWorkerClient
+/// workerClient</c> as plain typed parameters with no [FromServices]-style attribute, relying
+/// entirely on the MCP SDK inferring "these come from DI, not the model" from
+/// McpServerToolCreateOptions.Services (mirroring exactly how the real host wires tools in
+/// Program.cs via WithToolsFromAssembly). If the SDK ever stopped recognizing that - a version
+/// bump, a change in how Services is threaded through - every write tool's schema would gain a
+/// required object argument no model can ever supply, taking down the entire write surface,
+/// while attribute-only tests would stay green.
+///
+/// This is why it has to inspect McpServerTool.Create(...).ProtocolTool.InputSchema - the actual
+/// generated JSON schema - rather than attributes.
+/// </summary>
+public class McpToolSchemaTests
+{
+    private static readonly IServiceProvider Services = BuildServices();
+
+    private static IServiceProvider BuildServices()
+    {
+        var binding = new ProjectSessionBinding(null);
+        var workerClient = new OpennessWorkerClient(binding);
+        var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var cursorCodec = new ProjectTreeCursorCodec(protector);
+        var store = new ProjectTreeSnapshotStore(TimeProvider.System);
+        var projector = new ProjectTreePageProjector(cursorCodec);
+        var coordinator = new ProjectTreeBrowseCoordinator(
+            workerClient,
+            cursorCodec,
+            store,
+            projector,
+            TimeProvider.System);
+        var execution = new WriteExecution(new OpennessWriteBindingGate(workerClient),
+            new JsonlWriteAuditSink(Path.Combine(Path.GetTempPath(), "tia-schema-" + Guid.NewGuid().ToString("N"))),
+            LifecycleWriteDomain.Catalog, TimeProvider.System);
+        var hardwareCodec = new HardwarePageCursorCodec(protector);
+        var objectCodec = new NetworkObjectPageCursorCodec(protector);
+        var hardwareProjector = new HardwarePageProjector(hardwareCodec);
+        var hardwareCoordinator = new HardwarePaginationCoordinator(workerClient, hardwareCodec, hardwareProjector);
+        var objectCoordinator = new NetworkObjectPaginationCoordinator(workerClient, objectCodec);
+        var networkExecutor = new NetworkReadOperationExecutor(workerClient, hardwareCoordinator, objectCoordinator);
+        return new FakeServiceProvider(binding, workerClient, coordinator, execution,
+            protector, hardwareCodec, objectCodec, hardwareProjector, hardwareCoordinator, objectCoordinator, networkExecutor,
+            new TiaMcpServer.Hmi.HmiPageCursorCodec(protector));
+    }
+
+    private static string[] SchemaPropertyNames(Type toolType, string methodName)
+    {
+        var method = toolType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var tool = McpServerTool.Create(
+            method!,
+            target: null,
+            options: new McpServerToolCreateOptions { Services = Services });
+
+        var inputSchema = tool.ProtocolTool.InputSchema;
+        var names = inputSchema.TryGetProperty("properties", out var properties)
+            ? properties.EnumerateObject().Select(p => p.Name).ToArray()
+            : Array.Empty<string>();
+
+        // A DoesNotContain-only assertion downstream would pass vacuously if schema generation
+        // silently broke for a tool (empty/missing "properties" node) - this makes that a hard
+        // failure instead of a false green.
+        Assert.NotEmpty(names);
+        return names;
+    }
+
+    private static Type RequiredNetworkToolType(string name)
+    {
+        var type = typeof(NetworkOperationRequest).Assembly.GetType($"TiaMcpServer.Network.{name}");
+        Assert.NotNull(type);
+        return type!;
+    }
+
+    /// <summary>Raw generated input schema JSON text, for assertions that need to see nested
+    /// object shapes (e.g. <c>additionalProperties:false</c> closure) rather than just the
+    /// top-level property names <see cref="SchemaPropertyNames"/> exposes.</summary>
+    private static string SchemaRawText(Type toolType, string methodName)
+    {
+        var method = toolType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var tool = McpServerTool.Create(
+            method!,
+            target: null,
+            options: new McpServerToolCreateOptions { Services = Services });
+
+        return tool.ProtocolTool.InputSchema.GetRawText();
+    }
+
+    private static McpServerTool Tool(Type toolType, string methodName)
+    {
+        var method = toolType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(method);
+        return McpServerTool.Create(
+            method!,
+            target: null,
+            options: new McpServerToolCreateOptions
+            {
+                Services = Services,
+                SchemaCreateOptions = new AIJsonSchemaCreateOptions
+                {
+                    TransformOptions = new AIJsonSchemaTransformOptions
+                    {
+                        DisallowAdditionalProperties = true,
+                    },
+                },
+            });
+    }
+
+    // Exact sets: any extra public input, including a retired confirmation argument, fails here.
+    [Theory]
+    [InlineData(nameof(ProjectWriteTools.OpenProject), "dryRun,forceRebind,projectPath")]
+    [InlineData(nameof(ProjectWriteTools.CreateProject), "author,comment,dryRun,projectDirectory,projectName")]
+    [InlineData(nameof(ProjectWriteTools.SaveProject), "dryRun")]
+    [InlineData(nameof(ProjectWriteTools.SaveProjectAs), "dryRun,rebind,targetDirectory,targetName")]
+    [InlineData(nameof(ProjectWriteTools.ArchiveProject), "archiveDirectory,archiveName,dryRun,mode,saveBeforeArchive")]
+    [InlineData(nameof(ProjectWriteTools.CloseProject), "dryRun,saveBeforeClose")]
+    public void LifecycleSchemas_ExposeExactlyModelInputs(string methodName, string expected)
+    {
+        var properties = SchemaPropertyNames(typeof(ProjectWriteTools), methodName);
+
+        Assert.Equal(expected.Split(','), properties.OrderBy(name => name, StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>
+    /// Whole-assembly enumeration (not a hardcoded/spot-checked list of tool classes): finds
+    /// every type carrying <see cref="McpServerToolTypeAttribute"/> in the same assembly
+    /// ProjectWriteTools lives in - which, for TiaMcpServer.Tests, is the test assembly
+    /// itself, since the host's tool source files are compiled directly into it (see
+    /// TiaMcpServer.Tests.csproj's Compile Include entries). Counts every method on those types
+    /// carrying [McpServerTool] and asserts the exact approved surface: 19 tools total, and the
+    /// internal lifecycle probe (probe_project_status_for_lifecycle, never [McpServerTool]-decorated)
+    /// absent.
+    /// </summary>
+    [Fact]
+    public void McpToolSurface_ExposesExactlyNineteenApprovedTools()
+    {
+        var toolTypes = typeof(ProjectWriteTools).Assembly
+            .GetTypes()
+            .Where(t => t.GetCustomAttribute<McpServerToolTypeAttribute>() is not null);
+
+        var toolNames = toolTypes
+            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
+            .Select(m => m.GetCustomAttribute<McpServerToolAttribute>())
+            .Where(a => a is not null)
+            .Select(a => a!.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        var expected = new[]
+        {
+            "bind_project",
+            "get_project_status",
+            "hmi_read",
+            "browse_project_tree",
+                "compile_check",
+            "open_project",
+            "create_project",
+            "save_project",
+            "save_project_as",
+            "archive_project",
+            "close_project",
+            "network_read",
+            "network_write",
+            "plc_read",
+            "plc_write",
+            "plc_undo",
+            "hmi_write",
+            "read_cross_references", "vci_read", "vci_write"
+        };
+
+        Assert.Equal(expected.OrderBy(name => name), toolNames);
+        Assert.DoesNotContain("probe_network_object_attributes", toolNames);
+    }
+
+    [Fact]
+    public void McpReadOnlySurface_RemainsExactlyEightApprovedTools()
+    {
+        var toolNames = new[]
+        {
+            typeof(ProjectBindingTools),
+            typeof(ProjectReadTools),
+            RequiredNetworkToolType("NetworkReadTools"),
+            typeof(TiaMcpServer.Plc.PlcReadTools),
+            typeof(TiaMcpServer.Hmi.HmiReadTools),
+            typeof(TiaMcpServer.CrossReferences.CrossReferenceReadTools),
+            typeof(TiaMcpServer.Vci.VciReadTools),
+        }
+            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
+            .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
+            .Where(attribute => attribute is not null)
+            .Select(attribute => attribute!.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(
+            new[] { "bind_project", "browse_project_tree", "get_project_status", "hmi_read", "network_read", "plc_read", "read_cross_references", "vci_read" },
+            toolNames);
+        Assert.DoesNotContain("probe_network_object_attributes", toolNames);
+    }
+
+    [Fact]
+    public void OpenProject_SchemaStillExposesProjectPathAsAModelArgument()
+    {
+        // Negative assertions alone would also pass if the SDK generated an empty schema for
+        // every tool (e.g. a broken reflection path) - this proves it did pick up the real,
+        // model-facing parameters, not just excluded the DI ones.
+        var properties = SchemaPropertyNames(typeof(ProjectWriteTools), nameof(ProjectWriteTools.OpenProject));
+
+        Assert.Contains("projectPath", properties);
+        Assert.Contains("dryRun", properties);
+        Assert.DoesNotContain("acknowledge", properties);
+        Assert.DoesNotContain("confirm", properties);
+    }
+
+    [Fact]
+    public void OpenProject_SchemaStillExposesProjectPathAsAModelArgument_OnRegisteredTool()
+    {
+        var properties = SchemaPropertyNames(typeof(ProjectWriteTools), nameof(ProjectWriteTools.OpenProject));
+
+        Assert.Contains("projectPath", properties);
+        Assert.Contains("dryRun", properties);
+        Assert.DoesNotContain("acknowledge", properties);
+        Assert.DoesNotContain("confirm", properties);
+    }
+
+    [Fact]
+    public void RegisteredWriteToolSurface_ExposesExactlySixLifecycleTools()
+    {
+        var toolNames = new[] { typeof(ProjectWriteTools) }
+            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance))
+            .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
+            .Where(attribute => attribute is not null)
+            .Select(attribute => attribute!.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "archive_project",
+                "close_project",
+                "create_project",
+                "open_project",
+                "save_project",
+                "save_project_as"
+            },
+            toolNames);
+    }
+
+    [Theory]
+    [InlineData(typeof(TiaMcpServer.Plc.PlcReadTools), "PlcRead")]
+    [InlineData(typeof(TiaMcpServer.Network.NetworkReadTools), "NetworkRead")]
+    [InlineData(typeof(TiaMcpServer.Hmi.HmiReadTools), "HmiRead")]
+    [InlineData(typeof(TiaMcpServer.Vci.VciReadTools), "VciRead")]
+    public void ReadBatchSchemas_ExposeOnlyOperations(Type toolType, string methodName)
+    {
+        var properties = SchemaPropertyNames(toolType, methodName);
+
+        Assert.Equal(new[] { "operations" }, properties);
+    }
+
+    [Fact]
+    public void NetworkWrite_SchemaNeverExposesInjectedServiceParameters()
+    {
+        var properties = SchemaPropertyNames(
+            RequiredNetworkToolType("NetworkWriteTools"),
+            "NetworkWrite");
+
+        Assert.Equal(
+            new[] { "dryRun", "operations" },
+            properties.OrderBy(name => name).ToArray());
+        Assert.DoesNotContain("workerClient", properties);
+        Assert.DoesNotContain("safety", properties);
+    }
+
+    [Fact]
+    public void NetworkWrite_SchemaAdvertisesSubnetLifecycleOperationNamesAndNestedFieldsClosed()
+    {
+        var schema = SchemaRawText(RequiredNetworkToolType("NetworkWriteTools"), "NetworkWrite");
+
+        foreach (var operation in new[] { "create_subnet", "update_subnet", "delete_subnet" })
+        {
+            Assert.Contains(operation, schema, StringComparison.Ordinal);
+        }
+
+        // The exact nested request fields for the three lifecycle operations are advertised...
+        foreach (var member in new[]
+        {
+            "\"subnet\"",
+            "\"subnetChanges\"",
+            "\"networkType\"",
+            "\"highestAddress\"",
+            "\"transmissionSpeed\"",
+        })
+        {
+            Assert.Contains(member, schema, StringComparison.Ordinal);
+        }
+
+        // ...and every object in the generated schema (including the new nested subnet/
+        // subnetChanges shapes) is closed, so an unknown member is rejected rather than
+        // silently accepted by the model-facing contract.
+        Assert.Contains("\"additionalProperties\":false", schema, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NetworkOperationCatalog_WriteOperationNamesLocksInTheSubnetLifecycleTrio()
+    {
+        Assert.Contains("create_subnet", NetworkOperationCatalog.WriteOperationNames);
+        Assert.Contains("update_subnet", NetworkOperationCatalog.WriteOperationNames);
+        Assert.Contains("delete_subnet", NetworkOperationCatalog.WriteOperationNames);
+
+        // network_read must never advertise these as read operations.
+        Assert.DoesNotContain("create_subnet", NetworkOperationCatalog.ReadOperationNames);
+        Assert.DoesNotContain("update_subnet", NetworkOperationCatalog.ReadOperationNames);
+        Assert.DoesNotContain("delete_subnet", NetworkOperationCatalog.ReadOperationNames);
+    }
+
+    [Fact]
+    public void NetworkSelectorDescriptions_StateTheLockedRequiredAndOptionalRules()
+    {
+        static string DescriptionOf(string propertyName)
+            => typeof(NetworkObjectTarget).GetProperty(propertyName)!
+                .GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()!.Description;
+
+        Assert.Contains("deviceItem, networkInterface, and communicationConnection", DescriptionOf("ItemPath"));
+        var interfaceNameDescription = DescriptionOf("InterfaceName");
+        Assert.Contains("Optional", interfaceNameDescription);
+        Assert.Contains("exact interface-name constraint", interfaceNameDescription);
+        Assert.Contains("networkInterface kind or node kind with an owner path", interfaceNameDescription);
+        Assert.Contains("must be nonblank when supplied", interfaceNameDescription);
+        Assert.Contains("Required for communicationConnection", DescriptionOf("ConnectionType"));
+        Assert.Contains("Required for communicationConnection", DescriptionOf("LocalConnectionName"));
+        Assert.Contains("Required for S7Connection", DescriptionOf("LocalConnectionId"));
+        Assert.Contains("not applicable to HmiConnection", DescriptionOf("LocalConnectionId"));
+    }
+
+    /// <summary>
+    /// Minimal hand-rolled IServiceProvider (rather than pulling in Microsoft.Extensions.DependencyInjection
+    /// for a ServiceCollection) - the schema generator only needs GetService(type) to resolve for
+    /// the exact runtime types the tools declare, mirroring Program.cs's real DI registrations.
+    /// </summary>
+    private sealed class FakeServiceProvider : IServiceProvider, IServiceProviderIsService
+    {
+        private readonly Dictionary<Type, object> _services;
+
+        public FakeServiceProvider(params object[] services)
+            => _services = services.ToDictionary(s => s.GetType(), s => s);
+
+        public object? GetService(Type serviceType)
+        {
+            // The SDK's schema builder does not cast Services to IServiceProviderIsService - it
+            // asks the container to RESOLVE one: options.Services.GetService<IServiceProviderIsService>().
+            // The real Microsoft.Extensions.DependencyInjection ServiceProvider registers itself
+            // as that service internally; a hand-rolled IServiceProvider has to do the same, or
+            // every DI-injected parameter silently falls back to a required schema property
+            // (confirmed empirically before this line was added: "workerClient" showed up as a
+            // required {"type":"object"} property even though this class already implemented
+            // IServiceProviderIsService.IsService below - implementing the interface was not
+            // enough, resolving it through GetService is what the SDK actually calls).
+            if (serviceType == typeof(IServiceProviderIsService))
+            {
+                return this;
+            }
+
+            return _services.TryGetValue(serviceType, out var service) ? service : null;
+        }
+
+        public bool IsService(Type serviceType) => _services.ContainsKey(serviceType);
+    }
+
+    [Fact]
+    public void BrowseProjectTree_SchemaIsTheExactV3Surface()
+    {
+        var tool = Tool(typeof(ProjectReadTools), nameof(ProjectReadTools.BrowseProjectTree));
+        var schema = tool.ProtocolTool.InputSchema;
+        var properties = schema.GetProperty("properties");
+
+        Assert.Equal(
+            new[] { "cursor", "depth", "pageSize", "startSelector" },
+            properties.EnumerateObject().Select(property => property.Name).Order().ToArray());
+        Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+        Assert.False(properties.TryGetProperty("startPath", out _));
+        Assert.False(properties.TryGetProperty("deviceName", out _));
+
+        var selectorItems = properties.GetProperty("startSelector").GetProperty("items");
+        Assert.Equal(JsonValueKind.Object, selectorItems.ValueKind);
+        Assert.False(selectorItems.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal(
+            new[] { "name", "nodeType" },
+            selectorItems.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name).Order().ToArray());
+        Assert.Equal(
+            new[] { "name", "nodeType" },
+            selectorItems.GetProperty("required").EnumerateArray()
+                .Select(item => item.GetString()).Order().ToArray());
+
+        Assert.NotNull(tool.ProtocolTool.OutputSchema);
+        var method = typeof(ProjectReadTools).GetMethod(nameof(ProjectReadTools.BrowseProjectTree));
+        var attribute = method!.GetCustomAttribute<McpServerToolAttribute>();
+        Assert.True(attribute!.UseStructuredContent);
+        Assert.Equal(typeof(BrowseProjectTreeResponse), attribute.OutputSchemaType);
+    }
+
+    [Fact]
+    public async Task OnlyBindAndOpenAcceptProjectPath()
+    {
+        await using var harness = await McpProtocolTestHarness.StartProductionSurfaceAsync(McpAccessMode.Full);
+
+        var withPath = (await harness.Client.ListToolsAsync())
+            .Where(tool => tool.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("projectPath", out _))
+            .Select(tool => tool.Name)
+            .Order()
+            .ToArray();
+
+        Assert.Equal(new[] { "bind_project", "open_project" }, withPath);
+    }
+
+    [Fact]
+    public void CompileCheck_SchemaExposesOnlyModelInputs()
+    {
+        var properties = SchemaPropertyNames(
+            typeof(ProjectEngineeringTools),
+            nameof(ProjectEngineeringTools.CompileCheck));
+
+        Assert.Equal(
+            new[] { "blockPath", "plcName" },
+            properties.OrderBy(name => name).ToArray());
+        Assert.DoesNotContain("workerClient", properties);
+        Assert.DoesNotContain("confirm", properties);
+    }
+
+    [Fact]
+    public async Task EveryRegisteredToolSchemaIsClosed()
+    {
+        await using var harness = await McpProtocolTestHarness.StartProductionSurfaceAsync(McpAccessMode.Full);
+        var open = (await harness.Client.ListToolsAsync())
+            .Where(tool => !tool.ProtocolTool.InputSchema.TryGetProperty("additionalProperties", out var closed)
+                || closed.ValueKind != JsonValueKind.False)
+            .Select(tool => tool.Name)
+            .ToArray();
+        Assert.True(open.Length == 0, "Open input schemas: " + string.Join(", ", open));
+    }
+
+    /// <summary>
+    /// The snapshot is the tools/list outputSchema on main. Wrapped tools skip the SDK's legacy-wire
+    /// reshaping, so the legacy protocol is compared too; on main both protocols emit the same schemas.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("2025-11-25")]
+    public async Task OutputSchemasMatchMain(string? protocolVersion)
+    {
+        var snapshot = JsonNode.Parse(File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "Tools", "Snapshots", "output-schemas.json")))!.AsObject();
+        await using var harness = await McpProtocolTestHarness.StartProductionSurfaceAsync(McpAccessMode.Full,
+            clientOptions: new McpClientOptions { ProtocolVersion = protocolVersion });
+        var tools = await harness.Client.ListToolsAsync();
+
+        Assert.Equal(snapshot.Select(entry => entry.Key).Order(StringComparer.Ordinal),
+            tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
+        var differing = tools
+            .Where(tool => !JsonNode.DeepEquals(snapshot[tool.Name],
+                tool.ProtocolTool.OutputSchema is { } schema ? JsonNode.Parse(schema.GetRawText()) : null))
+            .Select(tool => tool.Name)
+            .ToArray();
+        Assert.True(differing.Length == 0, "Output schemas differ from main: " + string.Join(", ", differing));
+    }
+}
+
+[CollectionDefinition("Mcp protocol serial", DisableParallelization = true)]
+public sealed class McpProtocolSerialCollection;

@@ -1,0 +1,44 @@
+using System.ComponentModel;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using TiaMcpServer.Worker;
+using TiaMcpServer.Contracts.Block;
+
+namespace TiaMcpServer.Tools;
+
+/// <summary>Project engineering actions exposed in read-write and full modes.</summary>
+[McpServerToolType]
+public class ProjectEngineeringTools
+{
+    [McpServerTool(Name = "compile_check", ReadOnly = false, Destructive = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(CompileCheckResponse))]
+    [Description("Compile a PLC or selected block scope of the bound project and return compiler messages. TIA Portal can remove generated objects while compiling, such as motion OBs without technology objects: warnings names them, and plc_undo does not cover that. Not available in read-only mode.")]
+    public static async Task<CallToolResult> CompileCheck(
+        OpennessWorkerClient workerClient,
+        [Description("Optional PLC software name to compile.")] string? plcName = null,
+        [Description("Optional PLC block path to compile only that block.")] string? blockPath = null)
+    {
+        var accessDenial = workerClient.AccessPolicy.Authorize("compile_check");
+        if (accessDenial is not null)
+            return StructuredStandaloneResult.Create<CompileCheckReport>("compile_check", null,
+                accessDenial.Warnings, StandalonePayloadContract.Failure(accessDenial));
+
+        var bindingGate = await workerClient.RequireVerifiedBindingAsync().ConfigureAwait(false);
+        if (!bindingGate.Success)
+        {
+            return StructuredStandaloneResult.Create<CompileCheckReport>("compile_check", null,
+                bindingGate.Warnings, StandalonePayloadContract.Failure(bindingGate));
+        }
+
+        var execution = await workerClient.ExecuteWithPinnedBindingAsync(
+            workerClient.BindingSnapshot,
+            () => workerClient.CompileCheckAsync(blockPath: blockPath, plcName: plcName)).ConfigureAwait(false);
+        var result = execution.Success ? execution.Value! : execution.Failure!;
+        var rejection = StandalonePayloadContract.Rejection(result);
+        var outcome = rejection is null ? StandalonePayloadContract.DecodeCompile(result) : null;
+        var warnings = outcome?.Value is { } report
+            ? result.Warnings.Concat(CompileRemovals.Warnings(report)).ToArray()
+            : result.Warnings;
+        return StructuredStandaloneResult.Create("compile_check", outcome, warnings, rejection);
+    }
+}

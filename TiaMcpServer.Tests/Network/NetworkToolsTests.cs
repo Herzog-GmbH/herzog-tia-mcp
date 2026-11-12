@@ -1,0 +1,497 @@
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.Cursors;
+using TiaMcpServer.Json;
+using TiaMcpServer.Network;
+using TiaMcpServer.OperationBatches;
+using TiaMcpServer.Safety;
+using TiaMcpServer.Safety.Pipeline;
+using TiaMcpServer.Tests.TestSupport;
+using TiaMcpServer.Tests.Worker;
+using TiaMcpServer.Worker;
+using System.ComponentModel;
+using System.Reflection;
+using System.Text.Json;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using Xunit;
+
+namespace TiaMcpServer.Tests.Network;
+
+[Collection(RealWorkerProcessCollection.Name)]
+public class NetworkToolsTests
+{
+    [Theory]
+    [InlineData(256)]
+    [InlineData(257)]
+    [InlineData(200000)]
+    public async Task NetworkRead_OperationNameDiagnosticLimitRejectsBeforeWorkerDispatch(int length)
+    {
+        using var audit = new TempAuditDirectory();
+        Directory.CreateDirectory(audit.Path);
+        using var requests = new FakeWorkerRequestLog(audit.Path);
+        using var client = CreateClient();
+        var name = new string('n', length);
+        var operation = new NetworkOperationRequest { OperationId = "id", Operation = name };
+
+        var result = await NetworkRead(client, [operation]);
+
+        Assert.True(result.IsError);
+        var text = ReadText(result);
+        var root = ReadStructured(result);
+        Assert.Equal(CanonicalJson.Serialize(root), text);
+        Assert.Equal("validation_error", root.GetProperty("error").GetProperty("category").GetString());
+        Assert.True(text.Length < 6000);
+        if (length <= 256) Assert.Contains(name, text);
+        else
+        {
+            Assert.Contains("Each operation name must be at most 256 characters.", text);
+            Assert.DoesNotContain(name, text);
+        }
+        Assert.Empty(requests.Methods());
+        Assert.Empty(NetworkGuardedWriteMcpTests.AuditLines(audit.Path));
+    }
+
+    private const int ExpectedMaxOperationIdLength = 256;
+
+    /// <summary>A FakeWorker scenario whose hardware read AND write payloads both satisfy their
+    /// declared Phase 2 result contracts, and whose hardware state is stable across requests so a
+    /// dry-run/apply round trip binds.</summary>
+    private const string StableScenario = "network-roundtrip";
+
+    private static Type RequiredToolType(string name)
+    {
+        var type = typeof(NetworkOperationRequest).Assembly.GetType($"TiaMcpServer.Network.{name}");
+        Assert.NotNull(type);
+        return type!;
+    }
+
+    private static MethodInfo RequiredToolMethod(string typeName, string methodName)
+    {
+        var method = RequiredToolType(typeName).GetMethod(methodName, BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(method);
+        return method!;
+    }
+
+    private static async Task<CallToolResult> NetworkRead(
+        OpennessWorkerClient? client,
+        NetworkOperationRequest[] operations)
+    {
+        using var protector = AuthenticatedCursorProtector.CreateProcessScoped();
+        var executor = NetworkReadTestFactory.Create(client!, protector);
+        var task = RequiredToolMethod("NetworkReadTools", "NetworkRead")
+            .Invoke(null, new object?[] { client, executor, operations, CancellationToken.None }) as Task<CallToolResult>;
+        Assert.NotNull(task);
+        return await task!;
+    }
+
+    private static string ReadText(CallToolResult result)
+        => Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+    private static JsonElement ReadStructured(CallToolResult result)
+        => Assert.IsType<JsonElement>(result.StructuredContent);
+
+    private static async Task<CallToolResult> NetworkWrite(
+        OpennessWorkerClient? client,
+        WriteExecution safety,
+        NetworkOperationRequest[] operations,
+        bool dryRun = true)
+    {
+        var task = RequiredToolMethod("NetworkWriteTools", "NetworkWrite")
+            .Invoke(null, new object?[] { client, safety, operations, dryRun, CancellationToken.None }) as Task<CallToolResult>;
+        Assert.NotNull(task);
+        return await task!;
+    }
+
+    private static OpennessWorkerClient CreateClient(
+        McpAccessMode mode = McpAccessMode.ReadWrite,
+        ProjectSessionBinding? binding = null)
+        => new(
+            binding ?? new ProjectSessionBinding(null),
+            logger: null,
+            workerExecutablePath: FakeWorkerLocator.Locate(),
+            accessPolicy: new OperationAccessPolicy(mode));
+
+    private static async Task<OpennessWorkerClient> CreateBoundClientAsync(string projectPath)
+    {
+        var binding = new ProjectSessionBinding(null);
+        var client = CreateClient(binding: binding);
+        await FakeWorkerBinding.BindVerifiedAsync(client, binding, projectPath);
+        return client;
+    }
+
+    private static OpennessWorkerClient CreateWriteClient(
+        TempAuditDirectory audit,
+        out WriteExecution safety,
+        string projectPath = StableScenario)
+    {
+        var binding = new ProjectSessionBinding(null);
+        var client = CreateClient(binding: binding);
+        NetworkVerifiedWriteFixture.VerifyAsync(client, binding, projectPath).GetAwaiter().GetResult();
+        safety = NetworkGuardedWriteFixture.CreateRunner(client, audit.Path);
+        return client;
+    }
+
+    private static NetworkOperationRequest ReadHardware(string id, string? deviceName = null) => new()
+    {
+        OperationId = id,
+        Operation = "read_hardware_config",
+        DeviceName = deviceName,
+    };
+
+    private static NetworkOperationRequest AddDevice(
+        string id,
+        string deviceName = "AddedPLC",
+        string? deviceItemName = null) => new()
+    {
+        OperationId = id,
+        Operation = "add_network_device",
+        TypeIdentifier = "OrderNumber:6ES7 510-1DJ01-0AB0/V2.0",
+        DeviceName = deviceName,
+        DeviceItemName = deviceItemName,
+    };
+
+    private static NetworkOperationRequest ConfigureDevice(
+        string id,
+        string deviceName = "PLC_1") => new()
+    {
+        OperationId = id,
+        Operation = "configure_network_device",
+        Target = new NetworkObjectTarget { DeviceName = deviceName, NodeId = "node-1" },
+        Changes = new NetworkDeviceChanges { IpAddress = "192.168.0.10" },
+    };
+
+
+    [Fact]
+    public void DedicatedNetworkTools_HaveExactMcpMetadataAndDescriptions()
+    {
+        var readType = RequiredToolType("NetworkReadTools");
+        var writeType = RequiredToolType("NetworkWriteTools");
+        Assert.NotNull(readType.GetCustomAttribute<McpServerToolTypeAttribute>());
+        Assert.NotNull(writeType.GetCustomAttribute<McpServerToolTypeAttribute>());
+
+        var read = RequiredToolMethod("NetworkReadTools", "NetworkRead");
+        var readAttribute = read.GetCustomAttribute<McpServerToolAttribute>();
+        Assert.NotNull(readAttribute);
+        Assert.Equal("network_read", readAttribute!.Name);
+        Assert.True(readAttribute.ReadOnly);
+        Assert.False(readAttribute.Destructive);
+        Assert.False(readAttribute.OpenWorld);
+        Assert.False(string.IsNullOrWhiteSpace(read.GetCustomAttribute<DescriptionAttribute>()?.Description));
+        Assert.False(string.IsNullOrWhiteSpace(
+            read.GetParameters().Single(parameter => parameter.Name == "operations")
+                .GetCustomAttribute<DescriptionAttribute>()?.Description));
+
+        var write = RequiredToolMethod("NetworkWriteTools", "NetworkWrite");
+        var writeAttribute = write.GetCustomAttribute<McpServerToolAttribute>();
+        Assert.NotNull(writeAttribute);
+        Assert.Equal("network_write", writeAttribute!.Name);
+        Assert.False(writeAttribute.ReadOnly);
+        Assert.True(writeAttribute.Destructive);
+        Assert.False(writeAttribute.OpenWorld);
+        Assert.True(writeAttribute.UseStructuredContent);
+        Assert.Equal(typeof(NetworkGuardedWriteResponse), writeAttribute.OutputSchemaType);
+        Assert.False(string.IsNullOrWhiteSpace(write.GetCustomAttribute<DescriptionAttribute>()?.Description));
+        foreach (var parameterName in new[] { "operations", "dryRun" })
+        {
+            Assert.False(string.IsNullOrWhiteSpace(
+                write.GetParameters().Single(parameter => parameter.Name == parameterName)
+                    .GetCustomAttribute<DescriptionAttribute>()?.Description));
+        }
+    }
+
+    [Fact]
+    public void NetworkRead_DescriptionExplainsTheHardwarePaginationContract()
+    {
+        var description = RequiredToolMethod("NetworkReadTools", "NetworkRead")
+            .GetCustomAttribute<DescriptionAttribute>()?.Description;
+
+        Assert.NotNull(description);
+        Assert.Contains("pageSize", description, StringComparison.Ordinal);
+        Assert.Contains("cursor", description, StringComparison.Ordinal);
+        Assert.Contains("1..200", description, StringComparison.Ordinal);
+        Assert.Contains("defaults to 100", description, StringComparison.Ordinal);
+        Assert.Contains("default 100 on every page", description, StringComparison.Ordinal);
+        Assert.Contains("devices first, then subnets", description, StringComparison.Ordinal);
+        Assert.Contains("must remain unchanged", description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NetworkRead_RejectsEmptyBatchBeforeWorkerStartup()
+    {
+        var result = await NetworkRead(null, Array.Empty<NetworkOperationRequest>());
+
+        Assert.True(result.IsError);
+        Assert.Contains("at least one", ReadText(result));
+        var root = ReadStructured(result);
+        Assert.Equal("1.0", root.GetProperty("contractVersion").GetString());
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("warnings").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("batch").ValueKind);
+    }
+
+    [Fact]
+    public async Task NetworkRead_RejectsOversizedOperationIdBeforeWorkerStartup()
+    {
+        var operationId = new string('x', ExpectedMaxOperationIdLength + 1);
+
+        var result = await NetworkRead(null, new[] { ReadHardware(operationId) });
+
+        Assert.True(result.IsError);
+        var text = ReadText(result);
+        Assert.Contains($"at most {ExpectedMaxOperationIdLength} characters", text);
+        Assert.DoesNotContain(operationId, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NetworkRead_RejectsWriteOperationBeforeWorkerStartup()
+    {
+        var result = await NetworkRead(null, new[] { AddDevice("w1") });
+
+        Assert.True(result.IsError);
+        Assert.Contains("write operation", ReadText(result));
+    }
+
+    [Fact]
+    public async Task NetworkRead_ReturnsDeclaredJsonResultAndCopiesWarnings()
+    {
+        using var client = await CreateBoundClientAsync("network-read-warnings");
+
+        var result = await NetworkRead(client, new[] { ReadHardware("r1") });
+
+        var root = ReadStructured(result);
+        Assert.Equal("1.0", root.GetProperty("contractVersion").GetString());
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("warnings").ValueKind);
+        Assert.Empty(root.GetProperty("warnings").EnumerateArray());
+        var operation = root.GetProperty("batch").GetProperty("operations")[0];
+        Assert.Equal("succeeded", operation.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Object, operation.GetProperty("result").ValueKind);
+        Assert.Equal(0, operation.GetProperty("result").GetProperty("devices").GetArrayLength());
+        Assert.Equal(2, operation.GetProperty("warnings").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task NetworkRead_ContinuesAfterWorkerFailureAndAfterPayloadContractFailure()
+    {
+        using var client = await CreateBoundClientAsync("network-mixed-results");
+        var operations = new[]
+        {
+            ReadHardware("worker-failure", "worker-failure"),
+
+            // The worker reports success, but its payload is not a HardwareConfigInfo: a
+            // contract violation must fail the item instead of publishing unusable data.
+            ReadHardware("contract-failure", "contract-failure"),
+            ReadHardware("good", "good"),
+        };
+
+        var result = await NetworkRead(client, operations);
+
+        Assert.False(result.IsError, ReadText(result));
+        var root = ReadStructured(result);
+        Assert.False(root.GetProperty("success").GetBoolean());
+
+        var items = root.GetProperty("batch").GetProperty("operations");
+        Assert.Equal("failed", items[0].GetProperty("status").GetString());
+        Assert.Equal(
+            WorkerFailureCategories.WorkerOperationFailed,
+            items[0].GetProperty("failure").GetProperty("category").GetString());
+
+        Assert.Equal("failed", items[1].GetProperty("status").GetString());
+        Assert.Equal(
+            WorkerFailureCategories.ProtocolError,
+            items[1].GetProperty("failure").GetProperty("category").GetString());
+        Assert.Equal(JsonValueKind.Null, items[1].GetProperty("result").ValueKind);
+
+        // The rejected payload must never be echoed back; "seq" is the only field it contained.
+        Assert.DoesNotContain("seq", items[1].GetProperty("failure").GetProperty("message").GetString());
+
+        Assert.Equal("succeeded", items[2].GetProperty("status").GetString());
+        Assert.Equal(2, root.GetProperty("batch").GetProperty("counts").GetProperty("failed").GetInt32());
+        Assert.Equal(1, root.GetProperty("batch").GetProperty("counts").GetProperty("succeeded").GetInt32());
+    }
+
+    // Explicit dryRun:true selects the ordinary nonmutating preview; omitted dryRun executes.
+    // The preview helper is covered by NetworkWrite_PreviewBindsExactOrderedTargetsAndPerformsOnlyOneStateRead.
+
+    [Fact]
+    public async Task NetworkWrite_PreviewBindsExactOrderedTargetsAndPerformsOnlyOneStateRead()
+    {
+        using var audit = new TempAuditDirectory();
+        Directory.CreateDirectory(audit.Path);
+        using var requests = new FakeWorkerRequestLog(audit.Path);
+        using var client = CreateWriteClient(audit, out var safety, "network-roundtrip");
+        var before = requests.Methods().Length;
+        var operations = new[]
+        {
+            AddDevice("first", "AddedPLC"),
+            ConfigureDevice("second", "PLC_1"),
+        };
+
+        var preview = await NetworkWrite(client, safety, operations);
+
+        var root = ReadStructured(preview);
+        Assert.False(preview.IsError, ReadText(preview));
+        Assert.Equal("network_write", root.GetProperty("tool").GetString());
+        Assert.Equal("preview", root.GetProperty("phase").GetString());
+        var target = root.GetProperty("effects").EnumerateArray().Select(e => e.GetProperty("effect").GetProperty("target")).ToArray();
+        Assert.Equal("first", target[0].GetProperty("operationId").GetString());
+        Assert.Equal("add_network_device", target[0].GetProperty("operation").GetString());
+        Assert.Equal("AddedPLC", target[0].GetProperty("deviceName").GetString());
+        Assert.Equal("second", target[1].GetProperty("operationId").GetString());
+        Assert.Equal("configure_network_device", target[1].GetProperty("operation").GetString());
+        Assert.Equal("PLC_1", target[1].GetProperty("deviceName").GetString());
+
+        // The configure target's hardware-identity members are NetworkIdentityResolver's resolved
+        // evidence against this same read, not an echo of the request: node-1 is the exact nodeId
+        // the "network-roundtrip" fixture models for PLC_1's node.
+        Assert.Equal("node-1", target[1].GetProperty("nodeId").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(target[1].GetProperty("nodeName").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(target[1].GetProperty("networkInterfaceName").GetString()));
+        Assert.NotEmpty(target[1].GetProperty("deviceItemPath").EnumerateArray());
+
+        // Request 1 verifies the configured project, request 2 is the preview snapshot, and this
+        // third request proves the preview itself still issued exactly one state read.
+        Assert.Single(requests.Methods().Skip(before), method => method == "read_hardware_config");
+        Assert.DoesNotContain("add_network_device", requests.Methods());
+        Assert.DoesNotContain("configure_network_device", requests.Methods());
+    }
+
+    [Fact]
+    public async Task NetworkWrite_PreviewFailsClosedWhenConfigureTargetCannotBeResolved()
+    {
+        using var audit = new TempAuditDirectory();
+        using var client = CreateWriteClient(audit, out var safety, "network-unresolvable-target");
+
+        var result = await NetworkWrite(
+            client,
+            safety,
+            new[] { ConfigureDevice("configure") });
+
+        var root = ReadStructured(result);
+        Assert.True(result.IsError);
+        Assert.Equal("error", root.GetProperty("phase").GetString());
+        Assert.False(root.GetProperty("success").GetBoolean());
+        Assert.Equal(
+            WorkerFailureCategories.TargetNotFound,
+            root.GetProperty("error").GetProperty("category").GetString());
+    }
+
+
+
+    [Fact]
+    public async Task NetworkWrite_ReadOnlyDefenseRejectsBeforeSnapshot()
+    {
+        using var audit = new TempAuditDirectory();
+        using var client = CreateClient(McpAccessMode.ReadOnly);
+
+        var result = await NetworkWrite(client, NetworkGuardedWriteFixture.CreateRunner(client, audit.Path), new[] { AddDevice("w1") });
+
+        Assert.True(result.IsError);
+        Assert.Contains("read-only mode", ReadText(result));
+        Assert.Equal(
+            WorkerFailureCategories.AccessDenied,
+            ReadStructured(result).GetProperty("error").GetProperty("category").GetString());
+    }
+
+
+    [Fact]
+    public async Task NetworkWrite_SnapshotFailureReturnsErrorWithoutWriting()
+    {
+        using var audit = new TempAuditDirectory();
+        using var client = CreateWriteClient(audit, out var safety, "worker-error");
+
+        var result = await NetworkWrite(
+            client,
+            safety,
+            new[] { AddDevice("w1") });
+
+        var root = ReadStructured(result);
+        Assert.True(result.IsError);
+        Assert.Contains("boom", ReadText(result));
+        Assert.Equal("error", root.GetProperty("phase").GetString());
+        Assert.False(root.GetProperty("success").GetBoolean());
+    }
+
+    [Fact]
+    public async Task NetworkWrite_StateDecodeFailureIsAWholeToolError()
+    {
+        using var audit = new TempAuditDirectory();
+        using var client = CreateWriteClient(audit, out var safety, "ok");
+
+        // Scenario "ok" answers read_hardware_config with {"seq":N}, which is not a
+        // HardwareConfigInfo: nothing may be planned against a state that failed its contract.
+        var result = await NetworkWrite(client, safety, new[] { AddDevice("w1") });
+
+        var root = ReadStructured(result);
+        Assert.True(result.IsError);
+        Assert.Equal("error", root.GetProperty("phase").GetString());
+        Assert.Equal(
+            WorkerFailureCategories.ProtocolError,
+            root.GetProperty("error").GetProperty("category").GetString());
+        Assert.DoesNotContain("seq", ReadText(result));
+    }
+
+    [Fact]
+    public async Task NetworkWrite_SuccessfulApplyAppendsOneAuditRecord()
+    {
+        using var audit = new TempAuditDirectory();
+        using var client = CreateWriteClient(audit, out var safety);
+        var operations = new[] { AddDevice("w1") };
+
+        var result = await NetworkWrite(client, safety, operations, dryRun: false);
+
+        var root = ReadStructured(result);
+        Assert.False(result.IsError, ReadText(result));
+        Assert.True(root.GetProperty("success").GetBoolean(), root.GetRawText());
+        Assert.Equal("network_write", root.GetProperty("tool").GetString());
+        Assert.Equal("applied", root.GetProperty("phase").GetString());
+
+        var auditFile = Assert.Single(Directory.GetFiles(audit.Path, "*.jsonl"));
+        var record = JsonDocument.Parse(Assert.Single(File.ReadLines(auditFile)));
+
+        // The audit entry carries the exact canonical response document that was returned.
+        Assert.Equal(CanonicalJson.Serialize(root), record.RootElement.GetProperty("responseText").GetString());
+    }
+
+    [Fact]
+    public async Task NetworkWrite_ApplyFailureSkipsLaterOperationsAndWarnsThatNoRollbackWasAttempted()
+    {
+        using var audit = new TempAuditDirectory();
+        using var client = CreateWriteClient(audit, out var safety, "network-write-item-failure");
+        var operations = new[]
+        {
+            AddDevice("first"),
+            ConfigureDevice("second"),
+        };
+
+        var result = await NetworkWrite(client, safety, operations, dryRun: false);
+
+        var root = ReadStructured(result);
+        Assert.False(result.IsError, ReadText(result));
+        Assert.False(root.GetProperty("success").GetBoolean());
+
+        var items = root.GetProperty("batch").GetProperty("operations");
+        Assert.Equal("failed", items[0].GetProperty("status").GetString());
+        Assert.Equal("skipped", items[1].GetProperty("status").GetString());
+        Assert.Equal(
+            StructuredOperationSkipReasons.EarlierOperationFailed,
+            items[1].GetProperty("skipReason").GetString());
+
+        var warning = items[0].GetProperty("warnings")[0].GetString();
+        Assert.Contains("may already have changed", warning);
+        Assert.Contains("no rollback", warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NetworkWriteProjection_FailsSuccessfulWorkerCallWithInvalidPayload()
+    {
+        // The worker reports SUCCESS; only projecting its payload reveals the contract violation.
+        // WriteRun stops the batch on the projected status, so this item halts later writes.
+        var item = NetworkPayloadContract.Project(
+            AddDevice("first"), WorkerCallResult.Ok("""{"unexpected":true}"""));
+
+        Assert.Equal(OperationBatchStatus.Failed, item.Status);
+        Assert.Equal(WorkerFailureCategories.ProtocolError, item.Failure!.Category);
+    }
+
+}

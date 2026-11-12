@@ -1,0 +1,389 @@
+using Siemens.Engineering;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.OpennessWorker.Worker;
+
+namespace TiaMcpServer.OpennessWorker.Openness.Block;
+
+/// <summary>
+/// Runs a block import and reports its stages. A Siemens exception keeps its type rule and its text: the
+/// message stays the closed summary, the category follows <see cref="WorkerExecution.Classify"/> for a
+/// mutating method, and TIA Portal's own reason travels as <see cref="WorkerOperationException.EngineeringError"/>.
+/// </summary>
+internal static class BlockImportCoordinator
+{
+    public static BlockImportResult Execute(
+        string documentName,
+        string rawContent,
+        Action<DirectoryInfo, ParsedBlockImportBundle, BlockImportInvocationBoundary> importDocuments,
+        Func<bool, BlockPostconditionEvidence> observePostcondition,
+        Action<string>? cleanupDirectory = null,
+        Action<string>? createStagingDirectory = null,
+        Func<string, ParsedBlockImportBundle, IReadOnlyList<string>>? stageDocuments = null,
+        bool includeCompileWarnings = false)
+    {
+        if (importDocuments is null) throw new ArgumentNullException(nameof(importDocuments));
+        if (observePostcondition is null) throw new ArgumentNullException(nameof(observePostcondition));
+
+        ParsedBlockImportBundle bundle;
+        try
+        {
+            bundle = BlockImportBundleParser.Parse(documentName, rawContent);
+        }
+        catch (Exception failure)
+        {
+            throw CreatePreTargetFailure(failure, sourceApplicable: false);
+        }
+
+        string stagingPath;
+        try
+        {
+            stagingPath = Path.Combine(
+                Path.GetTempPath(), "tia-mcp-import-" + Guid.NewGuid().ToString("N"));
+        }
+        catch (Exception failure)
+        {
+            throw CreatePreTargetFailure(failure, sourceApplicable: false);
+        }
+
+        try
+        {
+            if (createStagingDirectory is null)
+                Directory.CreateDirectory(stagingPath);
+            else
+                createStagingDirectory(stagingPath);
+
+            var stagedPaths = stageDocuments is null
+                ? BlockImportStager.StageDocuments(stagingPath, bundle)
+                : stageDocuments(stagingPath, bundle);
+            VerifyStagedDocuments(stagingPath, bundle, stagedPaths);
+        }
+        catch (Exception failure)
+        {
+            var warnings = new List<string>();
+            var cleanupWarning = TryCleanupStaging(stagingPath, cleanupDirectory);
+            if (!string.IsNullOrEmpty(cleanupWarning))
+                warnings.Add(cleanupWarning!);
+            throw CreatePreTargetFailure(failure, sourceApplicable: false, warnings);
+        }
+
+        return RunOutcome(
+            new BlockSourceArtifactTracker(sourceApplicable: false),
+            (boundary, _) => importDocuments(new DirectoryInfo(stagingPath), bundle, boundary),
+            observePostcondition,
+            BlockImportDiagnosticContext.Import,
+            () => TryCleanupStaging(stagingPath, cleanupDirectory),
+            includeCompileWarnings);
+    }
+
+    public static BlockImportResult ExecuteSource(
+        Action<BlockImportInvocationBoundary, BlockSourceArtifactTracker> importSource,
+        Func<bool, BlockPostconditionEvidence> observePostcondition,
+        bool includeCompileWarnings = false)
+    {
+        if (importSource is null) throw new ArgumentNullException(nameof(importSource));
+        if (observePostcondition is null) throw new ArgumentNullException(nameof(observePostcondition));
+
+        return RunOutcome(
+            new BlockSourceArtifactTracker(sourceApplicable: true),
+            importSource,
+            observePostcondition,
+            BlockImportDiagnosticContext.Generation,
+            cleanup: null,
+            includeCompileWarnings);
+    }
+
+    internal static T ExecuteWithPreTargetOutcome<T>(
+        Func<T> operation,
+        bool sourceApplicable)
+    {
+        if (operation is null) throw new ArgumentNullException(nameof(operation));
+
+        try
+        {
+            return operation();
+        }
+        catch (WorkerOperationException failure) when (failure.BlockImportOutcome is null)
+        {
+            throw CreatePreTargetFailure(failure, sourceApplicable);
+        }
+        catch (Exception failure) when (failure is not WorkerOperationException)
+        {
+            throw CreatePreTargetFailure(failure, sourceApplicable);
+        }
+    }
+
+    private static BlockImportResult RunOutcome(
+        BlockSourceArtifactTracker sourceTracker,
+        Action<BlockImportInvocationBoundary, BlockSourceArtifactTracker> invokeTarget,
+        Func<bool, BlockPostconditionEvidence> observePostcondition,
+        BlockImportDiagnosticContext failureContext,
+        Func<string?>? cleanup,
+        bool includeCompileWarnings = false)
+    {
+        var boundary = new BlockImportInvocationBoundary();
+        var warnings = new List<string>();
+        Exception? primaryFailure = null;
+
+        try
+        {
+            invokeTarget(boundary, sourceTracker);
+        }
+        catch (Exception exception)
+        {
+            primaryFailure = exception;
+        }
+
+        BlockImportInvocationSnapshot invocation;
+        try
+        {
+            invocation = boundary.Snapshot();
+        }
+        catch (Exception snapshotFailure)
+        {
+            throw CreateAmbiguousBoundaryFailure(
+                primaryFailure ?? snapshotFailure,
+                sourceTracker,
+                observePostcondition,
+                failureContext,
+                cleanup);
+        }
+
+        BlockPostconditionEvidence evidence;
+        if (invocation.ImportStage == "not_started")
+        {
+            evidence = BlockPostconditionEvidence.Import(
+                BlockCompileObservation.NotStarted(), "not_started", null);
+        }
+        else
+        {
+            try
+            {
+                evidence = observePostcondition(invocation.ImportStage == "completed")
+                    ?? throw new InvalidOperationException("Block update observation returned no evidence.");
+            }
+            catch (Exception observationFailure)
+            {
+                if (primaryFailure is null)
+                    primaryFailure = observationFailure;
+                warnings.Add(BlockImportDiagnosticSanitizer.Failure(
+                    BlockImportDiagnosticContext.Verification, observationFailure));
+                evidence = BlockPostconditionEvidence.Import(
+                    BlockCompileObservation.Unavailable(null), "unavailable", null);
+            }
+        }
+
+        AddWarnings(warnings, evidence.Warnings);
+        if (cleanup is not null)
+        {
+            var cleanupWarning = cleanup();
+            if (!string.IsNullOrEmpty(cleanupWarning))
+                warnings.Add(cleanupWarning!);
+        }
+        warnings = new List<string>(BlockImportDiagnosticSanitizer.SanitizeWarnings(warnings));
+
+        var outcome = BlockPostconditionVerifier.CreateImportOutcome(
+            evidence,
+            invocation,
+            sourceTracker.Snapshot());
+
+        if (primaryFailure is not null)
+        {
+            if (primaryFailure is WorkerOperationException workerFailure)
+            {
+                AddWarnings(warnings, workerFailure.Warnings);
+                throw new WorkerOperationException(
+                    workerFailure.FailureCategory,
+                    BlockImportDiagnosticSanitizer.Failure(failureContext, workerFailure),
+                    BlockImportDiagnosticSanitizer.SanitizeWarnings(warnings),
+                    outcome,
+                    engineeringError: workerFailure.EngineeringError);
+            }
+
+            throw new WorkerOperationException(
+                CategoryOf(primaryFailure),
+                BlockImportDiagnosticSanitizer.Failure(failureContext, primaryFailure),
+                warnings,
+                outcome,
+                engineeringError: SiemensEvidence(primaryFailure));
+        }
+
+        try
+        {
+            outcome = BlockPostconditionVerifier.VerifyImport(
+                evidence,
+                invocation,
+                sourceTracker.Snapshot());
+        }
+        catch (WorkerOperationException failure)
+        {
+            AddWarnings(warnings, failure.Warnings);
+            throw new WorkerOperationException(
+                failure.FailureCategory,
+                failure.Message,
+                BlockImportDiagnosticSanitizer.SanitizeWarnings(warnings),
+                failure.BlockImportOutcome ?? outcome);
+        }
+
+        var finalWarnings = BlockImportDiagnosticSanitizer.SanitizeWarnings(warnings);
+        return new BlockImportResult(
+            "Import succeeded.",
+            outcome,
+            includeCompileWarnings
+                ? finalWarnings.Concat(BlockImportDiagnosticSanitizer.CompileWarningTexts(evidence.CompileObservation.Report)).ToArray()
+                : finalWarnings);
+    }
+
+    private static WorkerOperationException CreateAmbiguousBoundaryFailure(
+        Exception failure,
+        BlockSourceArtifactTracker sourceTracker,
+        Func<bool, BlockPostconditionEvidence> observePostcondition,
+        BlockImportDiagnosticContext failureContext,
+        Func<string?>? cleanup)
+    {
+        var warnings = new List<string>();
+        if (failure is WorkerOperationException workerFailure)
+            AddWarnings(warnings, workerFailure.Warnings);
+
+        BlockPostconditionEvidence evidence;
+        try
+        {
+            var observed = observePostcondition(false)
+                ?? throw new InvalidOperationException("Block update observation returned no evidence.");
+            evidence = BlockPostconditionEvidence.Import(
+                BlockCompileObservation.Unavailable(report: null),
+                observed.FinalReadStage,
+                observed.TargetPresent,
+                observed.Warnings);
+        }
+        catch (Exception observationFailure)
+        {
+            warnings.Add(BlockImportDiagnosticSanitizer.Failure(
+                BlockImportDiagnosticContext.Verification, observationFailure));
+            evidence = BlockPostconditionEvidence.Import(
+                BlockCompileObservation.Unavailable(report: null), "unavailable", null);
+        }
+
+        AddWarnings(warnings, evidence.Warnings);
+        if (cleanup is not null)
+        {
+            try
+            {
+                var cleanupWarning = cleanup();
+                if (!string.IsNullOrEmpty(cleanupWarning))
+                    warnings.Add(cleanupWarning!);
+            }
+            catch
+            {
+                warnings.Add(BlockImportDiagnosticSanitizer.StagingCleanupWarning());
+            }
+        }
+
+        var outcome = BlockPostconditionVerifier.CreateImportOutcome(
+            evidence,
+            new BlockImportInvocationSnapshot("unknown", "unavailable", null),
+            sourceTracker.Snapshot());
+
+        return new WorkerOperationException(
+            CategoryOf(failure),
+            BlockImportDiagnosticSanitizer.Failure(failureContext, failure),
+            BlockImportDiagnosticSanitizer.SanitizeWarnings(warnings),
+            outcome,
+            engineeringError: SiemensEvidence(failure));
+    }
+
+    private static WorkerOperationException CreatePreTargetFailure(
+        Exception failure,
+        bool sourceApplicable,
+        IReadOnlyList<string>? warnings = null)
+    {
+        var combinedWarnings = new List<string>();
+        if (failure is WorkerOperationException workerFailure)
+            AddWarnings(combinedWarnings, workerFailure.Warnings);
+        if (warnings is not null)
+            AddWarnings(combinedWarnings, warnings);
+
+        var evidence = BlockPostconditionEvidence.Import(
+            BlockCompileObservation.NotStarted(),
+            finalReadStage: "not_started",
+            targetPresent: null);
+        var outcome = BlockPostconditionVerifier.CreateImportOutcome(
+            evidence,
+            new BlockImportInvocationBoundary().Snapshot(),
+            new BlockSourceArtifactTracker(sourceApplicable).Snapshot());
+        var context = sourceApplicable
+            ? BlockImportDiagnosticContext.Generation
+            : BlockImportDiagnosticContext.Import;
+
+        return new WorkerOperationException(
+            CategoryOf(failure),
+            BlockImportDiagnosticSanitizer.Failure(context, failure),
+            BlockImportDiagnosticSanitizer.SanitizeWarnings(combinedWarnings),
+            outcome,
+            engineeringError: SiemensEvidence(failure));
+    }
+
+    /// <summary>update_block_logic mutates, so the type rule of <see cref="WorkerExecution.Classify"/> applies to the whole method.</summary>
+    internal static string CategoryOf(Exception failure)
+        => failure switch
+        {
+            WorkerOperationException categorized => categorized.FailureCategory,
+            EngineeringException engineering => WorkerExecution.Classify(engineering, mutates: true),
+            _ => WorkerFailureCategories.WorkerOperationFailed,
+        };
+
+    /// <summary>TIA Portal's own reason for a failed import, so the document can be fixed instead of narrowed down by trial.</summary>
+    internal static EngineeringErrorInfo? SiemensEvidence(Exception failure)
+        => failure switch
+        {
+            WorkerOperationException wrapped => wrapped.EngineeringError,
+            EngineeringException => WorkerExecution.Describe(failure),
+            _ => null,
+        };
+
+    private static string? TryCleanupStaging(
+        string stagingPath,
+        Action<string>? cleanupDirectory,
+        List<string>? warnings = null)
+    {
+        try
+        {
+            if (!Directory.Exists(stagingPath))
+                return null;
+            (cleanupDirectory ?? (path => Directory.Delete(path, recursive: true)))(stagingPath);
+            return null;
+        }
+        catch (Exception exception)
+        {
+            var warning = BlockImportDiagnosticSanitizer.StagingCleanupWarning();
+            warnings?.Add(warning);
+            _ = exception;
+            return warning;
+        }
+    }
+
+    private static void VerifyStagedDocuments(
+        string stagingPath,
+        ParsedBlockImportBundle bundle,
+        IReadOnlyList<string> stagedPaths)
+    {
+        if (stagedPaths.Count != bundle.Documents.Count)
+            throw new InvalidOperationException("Block import staging did not produce every declared document.");
+
+        for (var index = 0; index < bundle.Documents.Count; index++)
+        {
+            var expectedPath = Path.GetFullPath(Path.Combine(stagingPath, bundle.Documents[index].SafeFileName));
+            if (!string.Equals(expectedPath, stagedPaths[index], StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(stagedPaths[index]))
+                throw new InvalidOperationException("Block import staging did not preserve the declared document order.");
+        }
+    }
+
+    private static void AddWarnings(List<string> destination, IReadOnlyList<string> source)
+    {
+        foreach (var warning in source)
+        {
+            if (!destination.Contains(warning))
+                destination.Add(warning);
+        }
+    }
+}

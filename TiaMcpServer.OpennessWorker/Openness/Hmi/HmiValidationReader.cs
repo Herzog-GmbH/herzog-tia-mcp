@@ -1,0 +1,173 @@
+using Siemens.Engineering;
+using Siemens.Engineering.HmiUnified;
+using Siemens.Engineering.HmiUnified.Common;
+using TiaMcpServer.Contracts.Hmi;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.OpennessWorker.Worker;
+
+namespace TiaMcpServer.OpennessWorker.Openness.Hmi;
+
+/// <summary>
+/// Operation 20: <c>Validate()</c> over the objects of a category. The page is cut from the scanned objects in
+/// name order (kind then name for <c>all</c>), so the cost of a call is bounded by <c>limit</c>; findings are
+/// reported only for the objects of the page. Kinds without <c>Validate</c> (spike S6) are listed once in
+/// <c>notValidatable</c>. An unreadable composition fails the item; a recoverable <c>Validate</c> failure marks
+/// that object unvalidated with a message and the result incomplete.
+/// </summary>
+public static class HmiValidationReader
+{
+    public static HmiValidationInfo Validate(
+        HmiSoftware software, string category, string? name, HmiPaging paging, object project)
+    {
+        List<(object Item, string Name)> Scan()
+        {
+            if (NameScoped.Contains(category))
+            {
+                // The name selects the owning tag or screen, not an object of the category.
+                return ScopedObjects(software, category, name);
+            }
+
+            var scanned = Objects(software, category);
+            if (name is not null)
+            {
+                scanned = scanned.Where(o => string.Equals(o.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (scanned.Count == 0)
+                {
+                    throw new WorkerOperationException(
+                        WorkerFailureCategories.TargetNotFound,
+                        $"No '{category}' object named '{name}' was found. Use the list operations to see the objects.");
+                }
+            }
+
+            return scanned;
+        }
+
+        var (items, page) = HmiPager.Page(
+            Scan, o => category == "all" ? KindOf(o.Item) + "\0" + o.Name : o.Name, paging, project, software);
+        var info = new HmiValidationInfo { Page = page, Scanned = items.Count };
+        var log = new HmiReadLog();
+        var notValidatable = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var (item, itemName) in items)
+        {
+            var kind = KindOf(item);
+            if (!log.IsLive(paging, item, $"{kind} '{itemName}'"))
+            {
+                continue;
+            }
+
+            if (item is not IValidator validator)
+            {
+                notValidatable.Add(kind);
+                continue;
+            }
+
+            var results = Validate(validator, kind, itemName, log);
+            if (results is null)
+            {
+                continue;
+            }
+
+            if (results.Count == 0)
+            {
+                info.Clean++;
+            }
+            else
+            {
+                info.Findings.Add(new HmiValidationFindingInfo { ObjectKind = kind, Name = itemName, Results = results });
+            }
+        }
+
+        info.NotValidatable = notValidatable.ToList();
+        info.IsComplete = log.IsComplete;
+        info.Messages = log.Messages;
+        return info;
+    }
+
+    /// <summary>
+    /// The results with an error or a warning; null when the object could not be fully validated (a recoverable
+    /// failure, or a null result), so it is never reported clean.
+    /// </summary>
+    private static List<HmiValidationResultInfo>? Validate(IValidator validator, string kind, string name, HmiReadLog log)
+    {
+        var what = $"Validation of {kind} '{name}'";
+        var results = new List<HmiValidationResultInfo>();
+        try
+        {
+            var raw = validator.Validate()?.ToList();
+            if (raw is null)
+            {
+                log.Fail($"{what} returned no result list.");
+                return null;
+            }
+
+            foreach (var result in raw)
+            {
+                var errors = result?.Errors?.ToList();
+                var warnings = result?.Warnings?.ToList();
+                if (errors is null || warnings is null)
+                {
+                    log.Fail($"{what} returned a result without errors or warnings.");
+                    return null;
+                }
+
+                if (errors.Count > 0 || warnings.Count > 0)
+                {
+                    results.Add(new HmiValidationResultInfo
+                    {
+                        PropertyName = log.Try(() => result!.PropertyName, $"The property name of a result of {what}"),
+                        Errors = errors,
+                        Warnings = warnings,
+                    });
+                }
+            }
+        }
+        catch (EngineeringException ex)
+        {
+            log.Recover(ex, $"{what} failed: {ex.Message}");
+            return null;
+        }
+
+        return results;
+    }
+
+    private static string KindOf(object item) => item.GetType().Name;
+
+    private static readonly HashSet<string> NameScoped = new(StringComparer.Ordinal) { "memberTags", "loggingTags", "screenItems" };
+
+    private static List<(object Item, string Name)> ScopedObjects(HmiSoftware software, string category, string? name)
+    {
+        if (name is null)
+        {
+            throw new WorkerOperationException(
+                WorkerFailureCategories.ValidationError, $"Category '{category}' requires a name.");
+        }
+
+        if (category == "screenItems")
+        {
+            return HmiScreenReader.NamedScreenItems(software, name);
+        }
+
+        var tag = HmiTagLookup.FindUnique(software, name);
+        var tagName = HmiReadLog.Guard(() => tag.Name, "A tag name");
+        return (category == "memberTags" ? HmiTagReader.MemberObjects(tag, tagName) : HmiTagReader.LoggingTagObjects(tag, tagName)).ToList();
+    }
+
+    private static List<(object Item, string Name)> Objects(HmiSoftware software, string category) => category switch
+    {
+        "tags" => HmiTagReader.NamedTags(software),
+        "alarms" => HmiAlarmReader.NamedAlarms(software),
+        "screens" => HmiScreenReader.NamedScreens(software),
+        "connections" => HmiConnectionReader.NamedConnections(software),
+        "logs" => HmiLogReader.NamedLogs(software),
+        "alarmClasses" => HmiAlarmReader.NamedAlarmClasses(software),
+        "all" => new[]
+            {
+                HmiTagReader.NamedTags(software),
+                HmiAlarmReader.NamedAlarms(software), HmiAlarmReader.NamedAlarmClasses(software),
+                HmiConnectionReader.NamedConnections(software), HmiLogReader.NamedLogs(software),
+                HmiScreenReader.NamedScreens(software),
+            }.SelectMany(l => l).ToList(),
+        _ => throw new WorkerOperationException(
+            WorkerFailureCategories.ValidationError, $"'{category}' is not a validate category."),
+    };
+}

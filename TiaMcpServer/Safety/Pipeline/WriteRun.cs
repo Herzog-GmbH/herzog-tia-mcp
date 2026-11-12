@@ -1,0 +1,632 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using ModelContextProtocol.Protocol;
+using TiaMcpServer.Contracts.Safety;
+using TiaMcpServer.Json;
+using TiaMcpServer.OperationBatches;
+using TiaMcpServer.ProjectLifecycle;
+using TiaMcpServer.Tools;
+using TiaMcpServer.Contracts.Project;
+using TiaMcpServer.Contracts.Shared;
+using TiaMcpServer.Contracts.Worker;
+using TiaMcpServer.Worker;
+
+namespace TiaMcpServer.Safety.Pipeline;
+
+/// <summary>
+/// The state of one <see cref="WriteExecution"/> call: plans, fired guards, per-item outcomes and
+/// durations. Used once and discarded; it keeps <see cref="WriteExecution"/> itself small.
+/// </summary>
+internal sealed class WriteRun<TItem, TEffect, TVerification, TResponse>
+    where TItem : IOperationBatchItem
+{
+    private readonly IWriteDomain<TItem, TEffect, TVerification, TResponse> _domain;
+    private readonly WriteCall<TItem> _call;
+    private readonly IWriteBindingGate _gate;
+    private readonly IWriteAuditSink _audit;
+    private readonly WriteGuardCatalog _catalog;
+    private readonly TimeProvider _time;
+    private readonly IWriteBindingStrategy<TItem>? _bindingStrategy;
+    private readonly WriteConfirmationContext? _confirmation;
+    private readonly CancellationToken _cancellationToken;
+    private readonly DateTimeOffset _startedAt;
+    private readonly long _startTimestamp;
+    private readonly List<WriteGuardReport> _guards = new();
+    private readonly List<string> _warnings = new();
+    private readonly ItemPlan<TEffect>?[] _plans;
+    private readonly StructuredOperationItem?[] _outcomes;
+    private readonly bool[] _mutated;
+    private readonly long?[] _durations;
+    private ProjectBindingSnapshot _binding;
+    private StructuredOperationBatch? _batch;
+    private bool _applyStarted;
+    private bool _audited;
+    private bool _userAccepted;
+    private WriteAuditConfirmation _auditConfirmation = new("none", "not_requested");
+    private int _current = -1;
+    private long _itemStart;
+
+    public WriteRun(
+        IWriteDomain<TItem, TEffect, TVerification, TResponse> domain,
+        WriteCall<TItem> call,
+        IWriteBindingGate gate,
+        IWriteAuditSink audit,
+        WriteGuardCatalog catalog,
+        TimeProvider time,
+        IWriteBindingStrategy<TItem>? bindingStrategy = null,
+        WriteConfirmationContext? confirmation = null,
+        CancellationToken cancellationToken = default)
+    {
+        _domain = domain;
+        _call = call;
+        _gate = gate;
+        _audit = audit;
+        _catalog = catalog;
+        _time = time;
+        _bindingStrategy = bindingStrategy;
+        _confirmation = confirmation;
+        _cancellationToken = cancellationToken;
+        _startedAt = time.GetUtcNow();
+        _startTimestamp = time.GetTimestamp();
+        _binding = gate.CurrentBinding;
+        var count = call.Items?.Count ?? 0;
+        _plans = new ItemPlan<TEffect>?[count];
+        _outcomes = new StructuredOperationItem?[count];
+        _mutated = new bool[count];
+        _durations = new long?[count];
+    }
+
+    private IReadOnlyList<TItem> Items => _call.Items ?? Array.Empty<TItem>();
+
+    private ConfirmationMode ConfirmationMode => WriteConfirmationPolicy.For(_gate.AccessMode);
+
+    /// <summary>
+    /// Validation, gate, pin, and lease failures are reported and audited outside the lease;
+    /// everything from planning to the audit append runs inside it, under the pinned snapshot.
+    /// </summary>
+    public async Task<CallToolResult> ExecuteAsync()
+    {
+        try
+        {
+            return await ExecuteCoreAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!_audited)
+        {
+            AuditUnexpectedFailure(ex);
+            throw;
+        }
+    }
+
+    private async Task<CallToolResult> ExecuteCoreAsync()
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        var rejection = ValidateInput();
+        if (rejection is not null)
+        {
+            return Finish(Failure(WritePhases.Error, rejection));
+        }
+
+        if (_bindingStrategy is not null)
+        {
+            var prepared = await _bindingStrategy.PrepareAsync(_call, _cancellationToken).ConfigureAwait(false);
+            if (!prepared.Success)
+            {
+                return Finish(Failure(WritePhases.Error, prepared.Error ?? new WriteToolError(
+                    WorkerFailureCategories.BindingConflict, "The lifecycle binding could not be prepared.")));
+            }
+
+            _binding = prepared.Binding ?? throw new InvalidOperationException(
+                "A successful write preparation must return the exact snapshot to pin.");
+        }
+        else
+        {
+            var beforeGate = _gate.CurrentBinding;
+            var gate = await _gate.RequireVerifiedWriteBindingAsync().ConfigureAwait(false);
+            if (!gate.Success)
+            {
+                return Finish(Failure(WritePhases.Error, new WriteToolError(
+                    gate.FailureCategory ?? WorkerFailureCategories.BindingConflict,
+                    gate.Error ?? "The session holds no verified binding for this project.")));
+            }
+
+            var pinFailure = PinBinding(beforeGate);
+            if (pinFailure is not null)
+            {
+                return Finish(Failure(WritePhases.Error, pinFailure));
+            }
+        }
+
+        if (_binding.IsVerified && _binding.Context is { } projectContext
+            && !ProjectCapabilityCatalog.Supports(projectContext.ContainerKind, _domain.ToolName))
+        {
+            return Finish(Failure(WritePhases.Error, new WriteToolError(
+                WorkerFailureCategories.UnsupportedCapability,
+                $"{_domain.ToolName} is unavailable for this project container.")));
+        }
+
+        _cancellationToken.ThrowIfCancellationRequested();
+        var lease = await _gate.RunUnderLeaseAsync(_binding, RunLeasedAndFinishAsync, _cancellationToken).ConfigureAwait(false);
+        return lease.Success
+            ? lease.Value!
+            : Finish(Failure(WritePhases.Error, lease.Error ?? new WriteToolError(
+                WorkerFailureCategories.BindingConflict, "The project binding changed before the write could run.")));
+    }
+
+    /// <summary>
+    /// Pins the snapshot the lease runs under. A binding that was already verified must be unchanged
+    /// by the gate; a configured binding the gate verified must advance once for the same project.
+    /// Anything else means the binding moved between the gate and the lease.
+    /// </summary>
+    private WriteToolError? PinBinding(ProjectBindingSnapshot beforeGate)
+    {
+        var pinned = _gate.CurrentBinding;
+        _binding = pinned;
+        return WriteBindingPreparation.IsConsistent(beforeGate, pinned)
+            ? null
+            : new WriteToolError(
+                WorkerFailureCategories.BindingConflict,
+                "The project binding changed while the write was being checked. Check the project status and retry.");
+    }
+
+    private WriteToolError? ValidateInput()
+    {
+        if (OperationBatchRules.CheckCount(Items.Count) is { } countError)
+        {
+            return Validation(countError);
+        }
+
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in Items)
+        {
+            if (OperationBatchRules.CheckItem(item, seenIds) is { } itemError)
+            {
+                return Validation(itemError);
+            }
+        }
+
+        var validation = _domain.Validate(Items, _gate.AccessMode);
+        if (!validation.IsValid)
+        {
+            return validation.Error ?? Validation("The write request is invalid.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Runs the leased stages. An exception after the lease started is audited (a mutation may
+    /// already have happened) and then rethrown unchanged.
+    /// </summary>
+    private async Task<CallToolResult> RunLeasedAndFinishAsync()
+    {
+        try
+        {
+            return Finish(await RunLeasedAsync().ConfigureAwait(false));
+        }
+        catch (Exception ex) when (!_audited)
+        {
+            AuditUnexpectedFailure(ex);
+            throw;
+        }
+    }
+
+    private async Task<WriteReport<TEffect, TVerification>> RunLeasedAsync()
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        var plan = await _domain.PlanAsync(Items).ConfigureAwait(false);
+        if (!plan.Success)
+        {
+            return Failure(WritePhases.Error, plan.Error ?? new WriteToolError(
+                WorkerFailureCategories.TargetNotFound, "The write targets could not be resolved."));
+        }
+
+        if (plan.Items.Count != Items.Count || plan.Items.Any(item => item is null))
+        {
+            throw new InvalidOperationException(
+                $"'{_domain.ToolName}' must plan exactly one non-null item per operation ({Items.Count}).");
+        }
+
+        plan.Items.ToArray().CopyTo(_plans, 0);
+        var fired = _domain.EvaluateGuards(Items, plan.Items);
+        var decision = GuardDecisions.Decide(
+            fired,
+            ConfirmationMode,
+            _catalog,
+            _call.DryRun);
+        _guards.AddRange(decision.Guards);
+        switch (decision.Kind)
+        {
+            case GuardDecisionKind.Blocked:
+                return Failure(WritePhases.Blocked, new WriteToolError(
+                    WorkerFailureCategories.GuardBlocked, decision.Message!));
+        }
+
+        if (_call.DryRun)
+        {
+            return Report(WritePhases.Preview, success: true, error: null);
+        }
+
+        if (ConfirmationMode == ConfirmationMode.AskUser
+            && (_domain.ConfirmsEveryCall || decision.Kind == GuardDecisionKind.NeedsUser))
+        {
+            var refusal = await ConfirmAndRecheckAsync(plan, fired).ConfigureAwait(false);
+            if (refusal is not null)
+            {
+                return Failure(WritePhases.Blocked, refusal);
+            }
+        }
+
+        else if (ConfirmationMode == ConfirmationMode.Policy)
+        {
+            _auditConfirmation = new("policy", "not_requested");
+        }
+
+        return await MutateAndVerifyAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>The client reply covers exactly the planned identity, consequences and guard messages.</summary>
+    private async Task<WriteToolError?> ConfirmAndRecheckAsync(WritePlan<TEffect> planned, IReadOnlyList<FiredGuard> fired)
+    {
+        // Freeze before awaiting the client: a domain may hold mutable nested plan objects.
+        var plannedDocument = ConsequenceDocument(planned.Items);
+        var guardDocument = CanonicalJson.Serialize(fired);
+        var message = _domain.DescribeForConfirmation(Items, planned.Items) + "\n" + string.Join("\n", _guards
+            .Where(guard => guard.Severity == WriteGuardSeverities.Acknowledge)
+            .Select(guard => guard.Message));
+        _auditConfirmation = new("user", UserConfirmationOutcomes.Failed);
+        UserConfirmationResult reply;
+        try
+        {
+            reply = _confirmation?.Confirmation is null
+                ? new UserConfirmationResult(UserConfirmationOutcomes.Unsupported)
+                : await _confirmation.Confirmation.AskAsync(message, _cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            _auditConfirmation = new("user", UserConfirmationOutcomes.Cancelled);
+            throw;
+        }
+        _auditConfirmation = new("user", reply.Outcome);
+        _cancellationToken.ThrowIfCancellationRequested();
+        if (!reply.IsConfirmed)
+        {
+            return new WriteToolError(WorkerFailureCategories.AccessDenied,
+                reply.Outcome == UserConfirmationOutcomes.Unsupported
+                    ? "This write requires form elicitation, but this client does not support the required elicitation capability."
+                    : $"The write was refused because user confirmation was {reply.Outcome}.");
+        }
+
+        _userAccepted = true;
+        for (var index = 0; index < _guards.Count; index++)
+        {
+            if (_guards[index].Severity == WriteGuardSeverities.Acknowledge)
+            {
+                _guards[index] = _guards[index] with { Acknowledged = true };
+            }
+        }
+
+        if (!_binding.SameBinding(_gate.CurrentBinding))
+        {
+            return StaleConfirmation();
+        }
+
+        // The host lease excludes other host requests; it does not exclude edits in the TIA UI.
+        var fresh = await _domain.PlanAsync(Items).ConfigureAwait(false);
+        _cancellationToken.ThrowIfCancellationRequested();
+        if (!fresh.Success || fresh.Items.Count != Items.Count || fresh.Items.Any(item => item is null))
+        {
+            return StaleConfirmation();
+        }
+
+        var freshGuards = _domain.EvaluateGuards(Items, fresh.Items);
+        if (!_binding.SameBinding(_gate.CurrentBinding)
+            || plannedDocument != ConsequenceDocument(fresh.Items)
+            || guardDocument != CanonicalJson.Serialize(freshGuards))
+        {
+            return StaleConfirmation();
+        }
+
+        return null;
+    }
+
+    private static string ConsequenceDocument(IReadOnlyList<ItemPlan<TEffect>> items)
+        => typeof(TEffect) == typeof(LifecycleEffects)
+            ? CanonicalJson.Serialize(items.Select(plan => plan with
+            {
+                Effect = plan.Effect is LifecycleEffects effect
+                    ? (TEffect)(object)effect.ForConsequenceComparison() : plan.Effect
+            }).ToArray())
+            : CanonicalJson.Serialize(items);
+
+    private static WriteToolError StaleConfirmation() => new(WorkerFailureCategories.BindingConflict,
+        "The project identity, checked state, or consequences changed while confirmation was pending. "
+        + "Nothing was changed by this call; read the project state and start a fresh call.");
+
+    private async Task<WriteReport<TEffect, TVerification>> MutateAndVerifyAsync()
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        _applyStarted = true;
+        var stopped = false;
+        for (var index = 0; index < Items.Count; index++)
+        {
+            if (stopped)
+            {
+                _outcomes[index] = Skipped(Items[index]);
+                continue;
+            }
+
+            _current = index;
+            _itemStart = _time.GetTimestamp();
+            var item = await RunItemAsync(index).ConfigureAwait(false);
+            _durations[index] = ElapsedMs(_itemStart);
+            _outcomes[index] = item;
+            // Preserve the known result before propagating cancellation that arrived during dispatch.
+            _cancellationToken.ThrowIfCancellationRequested();
+            stopped = !string.Equals(item.Status, OperationBatchStatus.Succeeded, StringComparison.Ordinal);
+        }
+
+        _current = -1;
+        _batch = FinalizeBatch();
+        var verification = await _domain.VerifyAsync(_batch).ConfigureAwait(false);
+        _cancellationToken.ThrowIfCancellationRequested();
+        var verified = _domain.VerificationSucceeded(verification);
+        if (!verified)
+        {
+            _warnings.Add(WriteExecution.VerificationFailureMessage);
+        }
+        // Dispatch failures belong to the typed outcomes, not the call rejection field.
+        return Report(WritePhases.Applied, _batch.IsFullySuccessful && verified, error: null, _batch, verification);
+    }
+
+    /// <summary>Snapshots the outcomes, including operations skipped after an unexpected failure.</summary>
+    private StructuredOperationBatch FinalizeBatch()
+    {
+        var items = Items.Select((item, index) => _outcomes[index] ?? Skipped(item)).ToList();
+        var batch = MarkPartialWrite(items);
+        batch.Operations.ToArray().CopyTo(_outcomes, 0);
+        return batch;
+    }
+
+    private async Task<StructuredOperationItem> RunItemAsync(int index)
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        var item = Items[index];
+        if (_plans[index]!.DependsOn is not null)
+        {
+            var failure = await ReplanAsync(index).ConfigureAwait(false);
+            if (failure is not null)
+            {
+                return Failed(item, failure);
+            }
+        }
+
+        _cancellationToken.ThrowIfCancellationRequested();
+        _mutated[index] = true;
+        var result = await _domain.MutateAsync(item).ConfigureAwait(false);
+        return WithEngineeringError(_domain.Project(item, result), result);
+    }
+
+    /// <summary>
+    /// The one place a Siemens exception reaches a write item's failure, for every domain: the worker
+    /// attaches it to the failed response and no domain projection has to remember to copy it.
+    /// </summary>
+    private static StructuredOperationItem WithEngineeringError(StructuredOperationItem projected, WorkerCallResult result)
+        => result is { Success: false, EngineeringError: { } error } && projected.Failure is { EngineeringError: null } failure
+            ? projected with { Failure = failure with { EngineeringError = error } }
+            : projected;
+
+    /// <summary>Re-plans a dependent item and applies the late acknowledge rule to its guards.</summary>
+    private async Task<WriteToolError?> ReplanAsync(int index)
+    {
+        var item = Items[index];
+        var replan = await _domain.ReplanAsync(item).ConfigureAwait(false);
+        if (!replan.Success)
+        {
+            return replan.Error ?? new WriteToolError(
+                WorkerFailureCategories.TargetNotFound, $"Operation '{item.OperationId}' could not be re-resolved.");
+        }
+
+        var plan = replan.Plan ?? throw new InvalidOperationException(
+            $"'{_domain.ToolName}' re-planned '{item.OperationId}' successfully without a plan.");
+        _plans[index] = plan;
+        var decision = GuardDecisions.DecideLate(
+            _domain.EvaluateGuards(new[] { item }, new[] { plan }), ConfirmationMode, _catalog);
+        // A guard the planning pass already reported for this item is the same consequence, not a new one.
+        _guards.AddRange(decision.Guards.Where(late => !_guards.Any(guard =>
+            guard.Id == late.Id && guard.OperationId == late.OperationId && guard.Message == late.Message)).ToList());
+        return decision.Kind == GuardDecisionKind.Blocked
+            ? new WriteToolError(WorkerFailureCategories.GuardBlocked, decision.Message!)
+            : null;
+    }
+
+    /// <summary>
+    /// In a multi-item call, the item that stopped the call carries the partial-write guard and
+    /// warning. Its wording depends on whether that item's own mutation was attempted.
+    /// </summary>
+    private StructuredOperationBatch MarkPartialWrite(List<StructuredOperationItem> items)
+    {
+        var index = items.FindIndex(
+            item => string.Equals(item.Status, OperationBatchStatus.Failed, StringComparison.Ordinal));
+        var message = items.Count < 2 || index < 0 ? null
+            : _mutated[index] ? WriteExecution.PartialWriteMessage
+            : index > 0 ? WriteExecution.PartialWriteNotMutatedMessage
+            : null;
+        if (message is null)
+        {
+            return StructuredOperationBatch.FromItems(items);
+        }
+
+        var failed = items[index];
+        items[index] = failed with { Warnings = failed.Warnings.Append(message).ToArray() };
+        _guards.Add(new WriteGuardReport(
+            WriteGuardCatalog.PartialWriteGuardId,
+            _catalog.Get(WriteGuardCatalog.PartialWriteGuardId).Severity,
+            failed.OperationId,
+            message,
+            Acknowledged: null));
+        return StructuredOperationBatch.FromItems(items);
+    }
+
+    private WriteReport<TEffect, TVerification> Failure(string phase, WriteToolError error)
+        => Report(phase, success: false, error);
+
+    private WriteReport<TEffect, TVerification> Report(
+        string phase,
+        bool success,
+        WriteToolError? error,
+        StructuredOperationBatch? batch = null,
+        TVerification? verification = default)
+    {
+        var warnings = _guards
+            .Where(guard => guard.Severity == WriteGuardSeverities.Info)
+            .Select(guard => guard.Message)
+            .Concat(_warnings)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return new WriteReport<TEffect, TVerification>(
+            phase, success, error, warnings, _guards.ToArray(), Effects(), batch, verification);
+    }
+
+    private IReadOnlyList<WriteEffect<TEffect>> Effects()
+        => Items
+            .Select((item, index) => (item, plan: _plans.ElementAtOrDefault(index)))
+            .Where(pair => HasEffect(pair.plan))
+            .Select(pair => new WriteEffect<TEffect>(pair.item.OperationId, pair.plan!.Effect!))
+            .ToArray();
+
+    /// <summary>Composes the response once, audits it, and returns the same text as the tool result.</summary>
+    private CallToolResult Finish(WriteReport<TEffect, TVerification> report)
+    {
+        var text = CanonicalJson.Serialize(_domain.Compose(report));
+        _audit.Append(BuildAuditRecord(report, text));
+        _audited = true;
+        var isError = report.Phase is WritePhases.Error or WritePhases.Blocked;
+        return StructuredToolResult.CreateCanonical(text, isError);
+    }
+
+    /// <summary>
+    /// Audits a call that threw inside the lease. The domain may be what failed, so the recorded
+    /// response is the pipeline's own report rather than a composed one. Never throws.
+    /// </summary>
+    private void AuditUnexpectedFailure(Exception ex)
+    {
+        try
+        {
+            var error = new WriteToolError(
+                ex is OperationCanceledException ? WorkerFailureCategories.AccessDenied : WorkerFailureCategories.WorkerOperationFailed,
+                ex is OperationCanceledException ? "The caller cancelled the write call."
+                    : $"The write pipeline failed unexpectedly: {ex.GetType().Name}: {ex.Message}");
+            if (_current >= 0 && _outcomes[_current] is null)
+            {
+                _outcomes[_current] = Failed(Items[_current], error);
+                _durations[_current] = ElapsedMs(_itemStart);
+            }
+
+            if (_applyStarted && _batch is null)
+            {
+                _batch = FinalizeBatch();
+            }
+
+            var report = Report(WritePhases.Error, success: false, error, _batch);
+            _audit.Append(BuildAuditRecord(report, CanonicalJson.Serialize(report)));
+            _audited = true;
+        }
+        catch (Exception auditEx)
+        {
+            Console.Error.WriteLine(
+                $"TiaMcpServer: failed to audit a failed '{_domain.ToolName}' call: {auditEx.Message}");
+        }
+    }
+
+    private WriteAuditRecord BuildAuditRecord(WriteReport<TEffect, TVerification> report, string text)
+        => new(
+            WriteAuditRecord.Kind,
+            WriteAuditRecord.CurrentVersion,
+            _startedAt,
+            _domain.ToolName,
+            _domain.ContractVersion,
+            WriteAuditRecord.ModeName(_gate.AccessMode),
+            _auditConfirmation,
+            _binding.ProjectPath,
+            WriteAuditBinding.From(_binding),
+            AuditedRequest(),
+            report.Phase,
+            text,
+            "sha256:" + ContentHashRules.Sha256Hex(text),
+            report.Guards.Select(AuditGuard).ToArray(),
+            Items.Select(AuditItem).ToArray(),
+            ElapsedMs(_startTimestamp));
+
+    /// <summary>
+    /// Produktiv keeps the previous content in its snapshots, which expire. The audit log does not
+    /// expire, so there it records how much was sent instead of block text in the clear.
+    /// </summary>
+    private JsonElement AuditedRequest()
+    {
+        var request = CanonicalJson.ToElement(Items);
+        if (_gate.AccessMode != McpAccessMode.Produktiv
+            || JsonNode.Parse(request.GetRawText()) is not JsonArray items)
+        {
+            return request;
+        }
+
+        foreach (var item in items.OfType<JsonObject>())
+        {
+            if (item["content"] is JsonValue content && content.TryGetValue<string>(out var text))
+            {
+                item["content"] = null;
+                item["contentCharacters"] = text.Length;
+            }
+        }
+
+        return JsonSerializer.Deserialize<JsonElement>(items.ToJsonString());
+    }
+
+    /// <summary>Preserves accepted live acknowledgements even if a later stage throws.</summary>
+    private WriteAuditGuard AuditGuard(WriteGuardReport guard)
+        => new(
+            guard.Id,
+            guard.Severity,
+            guard.OperationId,
+            guard.Message,
+            guard.Acknowledged,
+            guard.Acknowledged == true
+                ? _userAccepted ? GuardSatisfactions.User : _auditConfirmation.By == "policy" ? GuardSatisfactions.Policy : null
+                : null);
+
+    /// <summary>One audit item; an operation that never ran is recorded as skipped with no duration.</summary>
+    private WriteAuditItem AuditItem(TItem item, int index)
+    {
+        var outcome = _outcomes.ElementAtOrDefault(index);
+        var plan = _plans.ElementAtOrDefault(index);
+        return new WriteAuditItem(
+            item?.OperationId ?? string.Empty,
+            item?.Operation ?? string.Empty,
+            HasEffect(plan) ? CanonicalJson.Serialize(plan!.Effect) : null,
+            plan?.Preconditions ?? Array.Empty<CheckedPrecondition>(),
+            outcome?.Status ?? OperationBatchStatus.Skipped,
+            outcome?.Failure?.Category,
+            outcome?.Failure?.Message,
+            outcome?.Warnings ?? Array.Empty<string>(),
+            _durations.ElementAtOrDefault(index));
+    }
+
+    private static bool HasEffect(ItemPlan<TEffect>? plan) => plan is not null && plan.Effect is not null;
+
+    private long ElapsedMs(long startTimestamp)
+        => (long)Math.Ceiling(_time.GetElapsedTime(startTimestamp).TotalMilliseconds);
+
+    private static WriteToolError Validation(string message)
+        => new(WorkerFailureCategories.ValidationError, message);
+
+    private static StructuredOperationItem Skipped(TItem item)
+        => new(
+            item.OperationId, item.Operation, OperationBatchStatus.Skipped, Result: null, Failure: null,
+            Omission: null, StructuredOperationSkipReasons.EarlierOperationFailed, Array.Empty<string>());
+
+    private static StructuredOperationItem Failed(TItem item, WriteToolError error)
+        => new(
+            item.OperationId, item.Operation, OperationBatchStatus.Failed, Result: null,
+            new StructuredOperationFailure(error.Category, error.Message), Omission: null, SkipReason: null,
+            Array.Empty<string>());
+}
