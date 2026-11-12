@@ -4,14 +4,14 @@
 8/19/19), never writes, never compiles, and never opens, saves or closes a project. It runs up to
 50 items per call on the structured JSON contract (`contractVersion:"1.1"`); items run
 independently, so a failing item does not stop later ones. Design background lives in the
-[hmi_read design spec](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-07-hmi-read-design.md), the
-[spike report](../superpowers/acceptance/reports/2026-10-07-hmi-read-spike.md), the
-[live acceptance report](../superpowers/acceptance/reports/2026-10-08-hmi-read-live-acceptance.md),
-the [completion spec](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-11-hmi-read-completion-design.md) and the
-[completion live acceptance report](../superpowers/acceptance/reports/2026-10-12-hmi-read-completion-live-acceptance.md).
+hmi_read design spec, the
+spike report, the
+live acceptance report,
+the completion spec and the
+completion live acceptance report.
 
 `hmi_write` separately provides nine tag-table, tag and alarm writes in writable modes on standalone
-projects and bound local sessions. The [write acceptance report](../superpowers/acceptance/reports/2026-10-14-hmi-write-live-acceptance.md)
+projects and bound local sessions. The write acceptance report
 qualifies the exact production source/package, launched side by side without global installation.
 
 ## Operations
@@ -291,7 +291,7 @@ result or proof of unchanged state. Preview has no mutation outcome or read-back
 
 ### Current qualification
 
-The [native-rejection qualification record](../superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md)
+The native-rejection qualification record
 records completed qualification within the recorded R1/R2/R3 scope. The fresh 35-case matrix ran on installed
 `4.2.0-local.112.g96a28b7`: 31 P variants produced 21 O1 native rejections, three O2 accepted
 invalid references, five accepted controls and two worker refusals, plus L1–L4. O1 error types
@@ -307,7 +307,7 @@ were reported by public Validate; write success does not certify their validity.
 | Cross-kind alarm-name reuse, table/alarm case-only rename, delete-then-create case variant | Accepted controls; intended objects/read state and public Validate matched |
 | Missing table group or text culture | Worker `target_not_found`; group refusal precedes Create, while the culture refusal can follow mutation and cleanup |
 
-The [31-variant table and canonical inputs](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/acceptance/reports/inputs/2026-10-30-hmi-write-native-rejections-live-cases.md)
+The 31-variant table and canonical inputs
 retain exact outcomes, independent reads, public validation and restoration. The checkpoint UI
 observations are not fresh compiles of every candidate variant.
 
@@ -354,8 +354,8 @@ No full `.113` matrix rerun, global O3-absence proof, or induced race/fault qual
   a subsequent `PlcTag` setter. Public request shape still requires `plcTag` with `connection`;
   the missing-connection probe's later `PlcTag` rejection does not qualify that isolated setter path.
 
-See the [improvement log](../IMPROVEMENT_LOG.md#open-hmi_read-follow-ups-2026-10-12) for follow-ups.
-The [earlier write acceptance report](../superpowers/acceptance/reports/2026-10-14-hmi-write-live-acceptance.md)
+See the improvement log for follow-ups.
+The earlier write acceptance report
 qualifies its historical both-mode functional verification on source `48f2edd`. Editor rendering remains one
 earlier-candidate maintainer check. Performance uses an archival baseline with no write tool:
 matched baseline-write comparisons and the three-repetition owner-transition gate remain

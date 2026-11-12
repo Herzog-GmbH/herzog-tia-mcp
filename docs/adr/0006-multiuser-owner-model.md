@@ -24,15 +24,9 @@ people's work, and every behavior change needed its own live verification gate.
 ## Consequences
 - One content implementation serves both container kinds; standalone behavior is preserved.
 - Local sessions can be read, edited, compiled and saved locally, but cannot be closed, discarded or committed through the tool; terminal actions belong to Portal.
-- Same-path or ambiguous owners fail closed. Reliable distinction of two sessions of one server project remains an open follow-up in the [improvement log](../IMPROVEMENT_LOG.md).
+- Same-path or ambiguous owners fail closed. Reliable distinction of two sessions of one server project remains an open follow-up in the improvement log.
 - Live acceptance was scoped by maintainer decision, so some matrix cases (full offline, headless/race) are recorded limits in the reports, not passes.
-- Undelivered: Project Server and session lifecycle, locks and markings as mutation preconditions, discard and remote commit (planned PR7-9, a `multiuser_write` catalogue, no fabricated `CheckIn`/`Update`). Their design stays in the kept [engineering design spec](records/2026-09-28-multiuser-engineering-design.md); successor plans start from it and from merged `main`.
+- Undelivered: Project Server and session lifecycle, locks and markings as mutation preconditions, discard and remote commit (planned PR7-9, a `multiuser_write` catalogue, no fabricated `CheckIn`/`Update`). Their design stays in the kept engineering design spec; successor plans start from it and from merged `main`.
 
 ## Evidence
-- In tree: [PR2 live](../superpowers/acceptance/reports/2026-10-05-multiuser-pr2-active-project-context-live.md), [PR3 offline](../superpowers/acceptance/reports/2026-10-06-multiuser-pr3-offline-validation.md), [PR3 live](../superpowers/acceptance/reports/2026-10-06-multiuser-pr3-live-verification.md), [PR4 live](../superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md), [PR5 live](../superpowers/acceptance/reports/2026-10-09-multiuser-pr5-live-verification.md), [PR6 live](../superpowers/acceptance/reports/2026-10-09-multiuser-pr6-live-verification.md).
-- Kept original: [multiuser engineering design spec](records/2026-09-28-multiuser-engineering-design.md).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [PR2 active project context plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-05-multiuser-pr2-active-project-context.md)
-  - [PR3 read-only inventory plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-05-multiuser-pr3-read-only-inventory.md)
-  - [PR4 open existing sessions plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-07-multiuser-pr4-open-existing-sessions.md)
-  - [Multiuser engineering design spec](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-28-multiuser-engineering-design.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

@@ -10,8 +10,7 @@ namespace TiaMcpServer.Contracts.Worker;
 /// Flat request envelope for one host→worker call, serialized as newline-delimited JSON.
 ///
 /// The shape is deliberately flat rather than one DTO per operation: the protocol is stable
-/// and per-operation types would cost more churn than they save. See "Deferred / explicitly
-/// not planned" in docs/IMPROVEMENT_LOG.md.
+/// and per-operation types would cost more churn than they save.
 ///
 /// <para>
 /// Only the fields relevant to <see cref="Method"/> are read; everything else is ignored.

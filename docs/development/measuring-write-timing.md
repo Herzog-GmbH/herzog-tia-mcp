@@ -40,4 +40,4 @@ python -I scripts/timing/measure_write_timing.py self-test
 
 `validate` is offline. It derives the expected write, read, projection, measured and discarded counts from the cases and runs recorded in `summary.json`, then re-checks each canonical write/audit pair, the labels, the medians and read consistency.
 
-Archived outputs are not kept in-tree; the earlier per-PR timing data is in the git tag `docs-archive-2026-10-30`.
+Timing outputs are not kept in the repository.

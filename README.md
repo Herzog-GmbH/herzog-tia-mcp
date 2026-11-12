@@ -83,4 +83,4 @@ Live tests against a real TIA Portal are in `scripts/live`. Their client (`mcp_c
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The original project's documentation is in [docs/](docs/README.md); its README is kept in [docs/upstream-README.md](docs/upstream-README.md). Those documents describe the behavior of `read-write` and `full`.
+MIT, see [LICENSE](LICENSE). Further documentation is in [docs/](docs/README.md); most of it describes the shared core and the `read-write` and `full` modes.

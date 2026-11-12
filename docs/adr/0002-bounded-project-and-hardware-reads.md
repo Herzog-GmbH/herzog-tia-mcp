@@ -25,15 +25,7 @@ expensive Openness walks and returned one unbounded result.
 - Paging gives a stable ordered set, not a transaction: later project changes do not alter a cached tree, and hardware cursors detect set drift rather than freeze it. Callers restart from page one when a cursor is unavailable.
 - Cursors do not survive host restart, expiry or a binding change; these are explicit failures, never a silent re-walk. Continuations must never trigger an implicit new walk.
 - Siemens objects stay in the net48 worker; worker payloads stay typed and are never echoed on rejection.
-- Narrowed later: the generic read batch no longer exists, and project reads are now bound-project tools (see [ADR-0007](0007-access-tiers-lifecycle-confirmation-and-binding.md), [ADR-0005](0005-canonical-json-contract.md)). Direct-Openness tree pruning stays a measured, open follow-up in the [improvement log](../IMPROVEMENT_LOG.md).
+- Narrowed later: the generic read batch no longer exists, and project reads are now bound-project tools (see [ADR-0007](0007-access-tiers-lifecycle-confirmation-and-binding.md), [ADR-0005](0005-canonical-json-contract.md)). Direct-Openness tree pruning stays a measured, open follow-up in the improvement log.
 
 ## Evidence
-- In tree: [project-tree v3 live](../superpowers/acceptance/reports/2026-09-06-issue-32-project-tree-v3-live.md); [PR6 project-tree safety scopes live](../superpowers/acceptance/reports/2026-09-01-pr6-project-tree-safety-scopes-live.md); [network phase 1](../superpowers/acceptance/reports/2026-08-01-16-48-48-network-operations-phase1.md) and [rerun](../superpowers/acceptance/reports/2026-08-01-16-56-00-network-operations-phase1-rerun.md) (offline, no live Portal; they cover the hardware read path).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-07-31-standalone-project-tools-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-07-31-standalone-project-tools.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-08-28-issue-31-project-completeness-pagination-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-28-project-enumeration-completeness.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-29-hardware-pagination.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-06-issue-32-scalable-project-tree-browsing-v3-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-06-issue-32-scalable-project-tree-browsing-v3.md
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

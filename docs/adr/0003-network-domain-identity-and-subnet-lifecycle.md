@@ -26,22 +26,8 @@
 
 ## Consequences
 - Every later structured tool reuses this seam and fail-closed selector posture; callers supply qualified selectors and restart paging after a stale cursor.
-- Phase 5 (IO-system editing) is unshipped. Its qualified field set, hardware-compile target rule and planned post-commit failure contract are recorded only in the qualified-contract spec at the archive tag; widening that scope needs new live evidence. The open item is in [IMPROVEMENT_LOG](../IMPROVEMENT_LOG.md).
+- Phase 5 (IO-system editing) is unshipped; widening that scope needs new live evidence.
 - Phase 6 attribute writes, if built, start from a positive closed allowlist.
 
 ## Evidence
-- In tree: [Phase 1 offline acceptance](../superpowers/acceptance/reports/2026-08-01-16-48-48-network-operations-phase1.md); [Phase 1 rerun](../superpowers/acceptance/reports/2026-08-01-16-56-00-network-operations-phase1-rerun.md); [Phase 5 PR2 qualification](../superpowers/acceptance/reports/2026-09-24-network-phase5-pr2-qualification.md); [JSON contract Phase 2 offline](../superpowers/acceptance/reports/2026-09-30-json-contract-phase2-offline-validation.md); [Phase 2 live](../superpowers/acceptance/reports/2026-10-01-json-contract-phase2-live-verification.md); [Phase 3 live](../superpowers/acceptance/reports/2026-10-01-json-contract-phase3-live-validation.md); [Phase 3 offline](../superpowers/acceptance/reports/2026-10-01-json-contract-phase3-offline-validation.md); [Discovery and node-identity repair](../superpowers/acceptance/reports/2026-10-04-network-discovery-and-interface-node-identity-repair-validation.md); [C-5 sealed cursors live](../superpowers/acceptance/reports/2026-10-23-c5-network-object-cursors-live-verification.md)
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-08-01-network-operations-phase1-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-01-network-operations-phase1.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-08-02-network-operations-phase2-json-contract-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-02-network-operations-phase2-json-contract.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-08-03-network-operations-phase3-identity-introspection-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-04-network-operations-phase3-identity-introspection.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-21-network-phases-4-6-delivery-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-24-network-phase5-qualified-contract.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-24-pr2-network-phase5-qualification.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-04-network-discovery-and-interface-node-identity-repair-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-04-network-discovery-and-interface-node-identity-repair.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-23-c5-sealed-network-object-cursors.md
-  - Undo note: https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-03-network-json-guarded-write-design.md (§12)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

@@ -30,10 +30,4 @@
 - Q1, Q2 and Q5 follow-ups, and the other review workstream items, are tracked in the review plan kept under `records/`, not here.
 
 ## Evidence
-- In tree: [B-16/Q3 live verification](../superpowers/acceptance/reports/2026-10-20-b16-q3-worker-portal-loss-live-verification.md), which includes the final installed candidate's standalone HMI read interruption (`portal_lost`, immediate `cursor_binding_mismatch` for HMI and tree cursors, recovery by reopen and rebind with the same host and worker).
-- In tree: [lifecycle tiers and bind_project](../superpowers/acceptance/reports/2026-10-03-lifecycle-tiers-bind-project-live-validation.md); [Multiuser PR2 active context](../superpowers/acceptance/reports/2026-10-05-multiuser-pr2-active-project-context-live.md); [Network B-4](../superpowers/acceptance/reports/2026-10-19-network-b4-live-verification.md); [Network object cursors C-5](../superpowers/acceptance/reports/2026-10-23-c5-network-object-cursors-live-verification.md).
-- Kept originals: [review plan with Q1-Q6](records/2026-10-17-codebase-simplification-review.md); [findings appendix](records/2026-10-17-codebase-simplification-review-findings.md).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [2026-10-17-codebase-simplification-review.md](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-17-codebase-simplification-review.md)
-  - [2026-10-17-codebase-simplification-review-findings.md](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-17-codebase-simplification-review-findings.md)
-  - [2026-10-19-worker-portal-loss.md](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-19-worker-portal-loss.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

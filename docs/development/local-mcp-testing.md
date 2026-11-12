@@ -238,8 +238,8 @@ matrix. No automatic replay follows timeout, crash, disconnect, or possible muta
 
 ## PR4 installed-public-tool local-session acceptance
 
-The [definition](../superpowers/acceptance/2026-10-07-multiuser-pr4-live-definition.md) and
-[October 8 report](../superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md)
+The definition and
+October 8 report
 record the installed-public-MCP protocol and scoped maintainer acceptance. Freeze the exact
 implementation commit/package, hash the actual installed host DLL and adjacent worker, and
 record launch mode/startup assertions before serialized calls. Do not use a new PR4 harness

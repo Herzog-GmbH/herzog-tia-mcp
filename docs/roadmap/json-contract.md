@@ -2,14 +2,14 @@
 
 Status: Phase 0 (decision and guard) is complete. Phase 1a (worker wire normalization) and
 Phase 1b (required-member enforcement) are complete. Phase 2 is implemented with offline qualification;
-live V21 acceptance remains pending. The [offline validation report](../superpowers/acceptance/reports/2026-09-30-json-contract-phase2-offline-validation.md)
+live V21 acceptance remains pending. The offline validation report
 records 4,513 passing tests, 93.94% line coverage, and two independent reviews without findings.
 Phase 3 is implemented with offline qualification and an installed-V21 reference Rebuild; its
-[validation record](../superpowers/acceptance/reports/2026-10-01-json-contract-phase3-offline-validation.md)
+validation record
 records 4,640 passing tests and the passing 80% gate (Cobertura line rate `0.9386`). Separately
-authorized [2026-10-01 lifecycle validation](../superpowers/acceptance/reports/2026-10-01-json-contract-phase3-live-validation.md)
+authorized 2026-10-01 lifecycle validation
 passed for its frozen source. The lifecycle-tier/confirmation/binding change invalidated that
-evidence for the new candidate; [Task13 on 2026-10-03](../superpowers/acceptance/reports/2026-10-03-lifecycle-tiers-bind-project-live-validation.md)
+evidence for the new candidate; Task13 on 2026-10-03
 replaced it on `3bb504b`. Full/read-write/read-only functional groups passed, and the maintainer
 reported no new read-only TIA dialog, completing Task13 live acceptance. Task14 current
 documentation/spec updates are complete. The report bounds the maintainer's worker-lifetime
@@ -22,11 +22,11 @@ functional outcomes and the timing protocol; the Task 7 fixture/offline closeout
 raw outcomes and worker-response carriers before permissive decoding, without request replay or
 worker replacement. Twelve previously failing malformed-wire cases, sixteen new controls and the
 focused 517-test set passed. The worker is unchanged; this follow-up has offline evidence only,
-without new live/timing qualification. See the [scoped report, final offline gate and limits](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md).
+without new live/timing qualification. See the scoped report, final offline gate and limits.
 HMI writes now use contract `2.0` while reads remain `1.1`. Initial public-read planning and
 caller-order simulation replace per-item re-planning; shared `TrustedWriteVerifier` and
 `HmiVerificationPolicy` report `trusted`/`superseded` without post-write read-back. The
-[2026-10-30 scoped report](../superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md)
+2026-10-30 scoped report
 separates the 35 functional cases on installed `4.2.0-local.112.g96a28b7` from the focused R1
 partial-failure check and manual UI, L5 and timing qualification on `4.2.0-local.113.g31d1a44`.
 Offline qualification passed 7,644 default tests
@@ -60,7 +60,7 @@ it without inventing a second mechanism.
 
 | Tool | Current contract | Plan |
 | --- | --- | --- |
-| `network_read`, `network_write` | Read `1.0`, write `2.0`; root warnings/explicit nulls; guarded write effects/batch/verification/omission | Implemented; scoped live matrix on `75c0568`, later host boundary fixes qualified offline only; see the [report, final offline gate and limits](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md) |
+| `network_read`, `network_write` | Read `1.0`, write `2.0`; root warnings/explicit nulls; guarded write effects/batch/verification/omission | Implemented; scoped live matrix on `75c0568`, later host boundary fixes qualified offline only; see the report, final offline gate and limits |
 | `browse_project_tree` | Structured (canonical seam, v3 envelope) | Phase 4: align envelope members |
 | `get_project_status`, `compile_check` | Structured standalone envelope (`1.0`) | Phase 2 implemented; live acceptance pending |
 | `bind_project` | Structured standalone envelope (`1.0`) | Implemented; Task13 live-accepted 2026-10-03 in all three modes, with the separate human read-only dialog observation recorded |
@@ -68,7 +68,7 @@ it without inventing a second mechanism.
 | `plc_read`, `read_cross_references` | Structured (`1.0`, root warnings/explicit nulls; 60,000-character value and 180,000-character document budgets) | Implemented and live-accepted 2026-10-05; replace `execute_read_batch`, which was retired |
 | `plc_write` | Structured guarded write envelope (`1.0`; effects, guards, typed batch and verification, omission) | Implemented and live-accepted 2026-10-07; replaces `preview_write_batch` and `apply_write_batch`, which were retired |
 | `hmi_read` | Structured (`1.1`, typed items, opt-in sealed snapshot cursors) | Implemented and live-accepted; see the [HMI reference](../SupportedOperations/HMI_OPERATIONS_SUMMARY.md) |
-| `hmi_write` | Structured guarded write envelope (`2.0`); typed native errors/partial outcomes; `trusted`/`superseded` without read-back | Implemented and qualified within the recorded R1/R2/R3 scope: 35 functional cases on `96a28b7`; focused R1, manual UI, L5 and timing on `31d1a44`, with six R3 compile waivers; see the [completed scoped report](../superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md) |
+| `hmi_write` | Structured guarded write envelope (`2.0`); typed native errors/partial outcomes; `trusted`/`superseded` without read-back | Implemented and qualified within the recorded R1/R2/R3 scope: 35 functional cases on `96a28b7`; focused R1, manual UI, L5 and timing on `31d1a44`, with six R3 compile waivers; see the completed scoped report |
 | `vci_read`, `vci_write` | Structured (`1.0`); `vci_write` uses the guarded write envelope | Implemented; scoped live acceptance 2026-10-16; see the [VCI reference](../SupportedOperations/VCI_OPERATIONS_SUMMARY.md) |
 
 The batch tools were excluded because the
@@ -266,7 +266,7 @@ which Phase 3 migrates to explicit nulls and strict required-member decoding.
 - Whole-value omission replaces substring truncation on these tools: 60,000 canonical value characters and 180,000 document characters, with measured omission metadata and retry guidance. The legacy formatter is retained until Phase 4.
 - Compilation success means compilation passed; compiler errors retain typed diagnostics with `success:false`, `error:null`, and `isError:false`. Attempted worker/protocol/identity failures use `result.failure`; pre-operation rejection sets top-level error and `isError:true`.
 - Both tools leave the legacy register, with success/rejection and malformed/error/omission probes through the real MCP SDK. Inputs, access ceilings, and binding behavior remain; compile authorization runs before binding reads.
-- The [implementation plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-30-json-contract-phase2-standalone-tools.md) records execution. Installed-V21 producer compatibility must be qualified on a separately authorized disposable fixture before claiming live acceptance. No package release/tag is made during the write-safety transition.
+- The implementation plan records execution. Installed-V21 producer compatibility must be qualified on a separately authorized disposable fixture before claiming live acceptance. No package release/tag is made during the write-safety transition.
 
 ### Phase 3: Lifecycle Onto the Guarded Write Pipeline
 
@@ -301,7 +301,7 @@ built lifecycle tokens only for the redesign to delete them.
   schema, typed failure, omission, and elicitation probes. Only the three batch tools remain legacy.
 - `ProjectLifecycleTools` and unused lifecycle token paths are retired here. Batch/Network token
   helpers, `SafetyRead`, and their legacy audit support stayed until Phase 4 retired them.
-- The [implementation plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-02-lifecycle-tiers-and-project-binding.md) records
+- The implementation plan records
   the delivery and gates. The Oct1 run passed on its source; Task13's Oct3 replacement qualified
   six operations, seven guards, accepted/declined/unsupported client behavior, dry runs, persisted
   artifacts, and restoration on the new frozen candidate. The report keeps programmatic acceptance
@@ -314,15 +314,15 @@ built lifecycle tokens only for the redesign to delete them.
 non-null before/after binding state and in-call Portal inventory. No request implicitly opens a
 project; ordinary reads never bind or switch. Project-tree cursors now reject binding changes as
 `cursor_binding_mismatch`. Mode counts are 7/17/17. The
-[engineering log](../IMPROVEMENT_LOG.md) records the completed human dialog observation and tracks the
+engineering log records the completed human dialog observation and tracks the
 `totally-integrated-claude` plugin's `tia-portal-mcp` skill migration; installed plugin files were
 not changed by this documentation task.
 
 ### Phase 4: Align and Retire
 
-- Network alignment delivered with guarded writes: read `1.0`, write `2.0`, warnings/explicit nulls, effects and typed mutation outcomes; actual-by-default `dryRun=false`, no server elicitation. Planning uses one initial hardware snapshot; `TrustedWriteVerifier` with domain policies reports `trusted`/`superseded` for successful prefix items, without immediate/final native read-back. Failed/skipped items have no verification entry. Configure stops at the first native rejection and retains `appliedSettings`; `skippedSettings`, immediate `identity`/`checks`, `finalChecks` and `networkDeviceCount` are retired. Legacy/unknown-root/nonboolean rejection before entry returns the canonical `validation_error` document with no audit; entered denials use a canonical root error and one audit. Aggregate encoded-ID protected-core admission retains per-ID 256, without a smaller per-ID limit. Whole omissions can report delivery failure while retaining true execution summaries; audit text/hash matches exact delivery. The scoped matrix and timing are qualified in the [live report](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md). See the [current Network contract](../SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md#network_write-envelope).
-- HMI alignment delivered as write `2.0`, read `1.1`: one initial evidence set per HMI with caller-order dependency simulation, no per-item re-plan or post-write public reads. Its three guards are `hmi_state_unverifiable` (block), `hmi_deletes_table_contents` and `hmi_deletes_referenced_tag` (info). Typed Siemens failures carry `engineeringError` unless `portal_lost` takes precedence. A partial `HmiWriteOutcome` is conditional on reaching writer allocation; HMI resolution can fail before an outcome exists. Non-engineering categorized failures can carry outcomes too, and `portal_lost` can retain an outcome while omitting the engineering error. Shared verification uses flat effect keys, including old/new rename names and removed-tag keys for a later table delete; failed/skipped items have no entry. A failed item with a result can supersede earlier items even when its category normally describes a precondition refusal. `appliedProperties` records completed stages and can omit a setter's partial mutation. Callers must read affected state, run `hmi_read validate` and compile in the Portal UI. PLC content-importer exception flattening remains open; see the [HMI reference](../SupportedOperations/HMI_OPERATIONS_SUMMARY.md) and [scoped report](../superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md).
-- VCI alignment delivered as write `2.0`, read `1.0`: native failures retain `engineeringError` and typed outcomes with capped leaf diagnostics; completed items use workspace-wide shared `trusted`/`superseded` verification without native read-back. Only the first item per workspace is planned; dependents have no inventory/evidence guards or re-plan. Portal owns existing-file and mapping-key behavior, while exact shared-root, containment and directory boundaries remain guarded. The [VCI reference](../SupportedOperations/VCI_OPERATIONS_SUMMARY.md) defines the contract; the [scoped report](../superpowers/acceptance/reports/2026-11-01-vci-write-native-rejections-live-verification.md) records native outcomes, measured synchronization regressions and limits.
+- Network alignment delivered with guarded writes: read `1.0`, write `2.0`, warnings/explicit nulls, effects and typed mutation outcomes; actual-by-default `dryRun=false`, no server elicitation. Planning uses one initial hardware snapshot; `TrustedWriteVerifier` with domain policies reports `trusted`/`superseded` for successful prefix items, without immediate/final native read-back. Failed/skipped items have no verification entry. Configure stops at the first native rejection and retains `appliedSettings`; `skippedSettings`, immediate `identity`/`checks`, `finalChecks` and `networkDeviceCount` are retired. Legacy/unknown-root/nonboolean rejection before entry returns the canonical `validation_error` document with no audit; entered denials use a canonical root error and one audit. Aggregate encoded-ID protected-core admission retains per-ID 256, without a smaller per-ID limit. Whole omissions can report delivery failure while retaining true execution summaries; audit text/hash matches exact delivery. The scoped matrix and timing are qualified in the live report. See the [current Network contract](../SupportedOperations/NETWORK_OPERATIONS_SUMMARY.md#network_write-envelope).
+- HMI alignment delivered as write `2.0`, read `1.1`: one initial evidence set per HMI with caller-order dependency simulation, no per-item re-plan or post-write public reads. Its three guards are `hmi_state_unverifiable` (block), `hmi_deletes_table_contents` and `hmi_deletes_referenced_tag` (info). Typed Siemens failures carry `engineeringError` unless `portal_lost` takes precedence. A partial `HmiWriteOutcome` is conditional on reaching writer allocation; HMI resolution can fail before an outcome exists. Non-engineering categorized failures can carry outcomes too, and `portal_lost` can retain an outcome while omitting the engineering error. Shared verification uses flat effect keys, including old/new rename names and removed-tag keys for a later table delete; failed/skipped items have no entry. A failed item with a result can supersede earlier items even when its category normally describes a precondition refusal. `appliedProperties` records completed stages and can omit a setter's partial mutation. Callers must read affected state, run `hmi_read validate` and compile in the Portal UI. PLC content-importer exception flattening remains open; see the [HMI reference](../SupportedOperations/HMI_OPERATIONS_SUMMARY.md) and scoped report.
+- VCI alignment delivered as write `2.0`, read `1.0`: native failures retain `engineeringError` and typed outcomes with capped leaf diagnostics; completed items use workspace-wide shared `trusted`/`superseded` verification without native read-back. Only the first item per workspace is planned; dependents have no inventory/evidence guards or re-plan. Portal owns existing-file and mapping-key behavior, while exact shared-root, containment and directory boundaries remain guarded. The [VCI reference](../SupportedOperations/VCI_OPERATIONS_SUMMARY.md) defines the contract; the scoped report records native outcomes, measured synchronization regressions and limits.
 - Project tree: move to `tool`, `success`, and `error` in its next major contract version.
 - Lifecycle, Network and generic-batch token paths are retired. The remaining legacy text pieces
   (`StandaloneToolResultFormatter`, `WorkerCallResult.ToText` and `ToEnvelopeText`) were deleted

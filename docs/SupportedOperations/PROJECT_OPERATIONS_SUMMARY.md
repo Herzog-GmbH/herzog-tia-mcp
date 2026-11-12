@@ -76,7 +76,7 @@ and `save_project` are delivered (see the
 `save_project` uses `LocalSession.Save()` and never checks in to the Project Server. Local
 create, save-as, archive and generic close reject with `unsupported_capability`, including previews.
 
-The [PR4 live report](../superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md)
+The PR4 live report
 records scoped maintainer acceptance. Two retained UI Portals recovered local sessions online in
 read-write/full; offline read-write previews passed, while actual opening required operator
 dismissal of Siemens dialogs. Noninteractive offline opening failed in both tested fixtures.
@@ -417,9 +417,9 @@ six tools, remove old public confirmation/token arguments and agent confirmation
 --confirm-with-user was removed. Confirmation follows the access mode: read-write asks for every lifecycle call; use --access-mode full to run lifecycle tools without prompts.
 ```
 
-The valid [2026-10-01 lifecycle matrix](../superpowers/acceptance/reports/2026-10-01-json-contract-phase3-live-validation.md)
+The valid 2026-10-01 lifecycle matrix
 was invalidated for this candidate by the tier/confirmation/binding change and replaced by the
-[2026-10-03 live run](../superpowers/acceptance/reports/2026-10-03-lifecycle-tiers-bind-project-live-validation.md).
+2026-10-03 live run.
 All three functional groups passed; the maintainer reported no new TIA dialog in read-only,
 completing the separate human observation. The report preserves runtime/client/artifact/restoration limits and exclusions.
 

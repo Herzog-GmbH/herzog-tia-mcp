@@ -6,7 +6,7 @@ or typed local-session `.amc21` owners. Current discovery is **8/19/19** tools i
 read-only/read-write/full. PR4 adds explicit existing `.als21` opening in writable modes and
 basic local status; PR5 adds local content reads and PR6 local content writes, compilation and
 `LocalSession.Save()` (see [Internal context](#internal-context)). PR1/PR2 ownership contracts remain the foundation; Issue #65 is incomplete.
-PR 3 has [installed-tool live acceptance](../superpowers/acceptance/reports/2026-10-06-multiuser-pr3-live-verification.md)
+PR 3 has installed-tool live acceptance
 for all six inspection actions against authorized session copies and a standalone `.ap21`,
 including remote reads with zero open projects. The maintainer accepted live testing as finished
 and passed on October 6; the report retains non-blocking unexecuted cases as evidence limitations.
@@ -96,7 +96,7 @@ Fatal `NonRecoverableException` from inventory escapes to the shared worker
 `portal_lost` mapping; final attachment checks cannot replace the original fatal
 body exception. Ordinary server failures still preserve a healthy binding, and
 existing identity/disposal-only refusals retain `binding_conflict`. The
-[B-16/Q3 record](../superpowers/acceptance/reports/2026-10-20-b16-q3-worker-portal-loss-live-verification.md) records offline
+B-16/Q3 record records offline
 coverage and maintainer-accepted scoped live read testing. Dedicated native
 inventory-fault injection remains untested; earlier local-session observations
 are limited to the recorded candidate and fixtures.
@@ -147,7 +147,7 @@ use that owner. PR5 content reads (`browse_project_tree`, `plc_read`, `network_r
 common `ProjectBase` root and are advertised as `projectContent`. PR6 adds `plc_write` (all
 operations), `network_write` (all operations), `compile_check` and `save_project` on the same root.
 The nine `hmi_write` operations also use this local root; see the [HMI reference](HMI_OPERATIONS_SUMMARY.md)
-and [both-mode write acceptance](../superpowers/acceptance/reports/2026-10-14-hmi-write-live-acceptance.md).
+and both-mode write acceptance.
 A local `save_project` calls `LocalSession.Save()`: it persists the local session only and never
 updates from or checks in to the Project Server; read-write confirmation states this. Create,
 save-as, archive, generic close and the internal IO-system/subnet qualification probes reject with
@@ -159,14 +159,14 @@ conflicting server change surfaces only at a later update or check-in.
 
 Reads observe the local session only. They report no other-user markings, freshness or
 outdated-object state, and they do not establish Project Server connectivity. The
-[PR5 live report](../superpowers/acceptance/reports/2026-10-09-multiuser-pr5-live-verification.md)
+PR5 live report
 records one cold-adopted local session (reported mode and connection `unknown`) and a standalone
 regression; deliberately Exclusive and offline sessions were not exercised. The
-[hmi_read completion report](../superpowers/acceptance/reports/2026-10-12-hmi-read-completion-live-acceptance.md)
+hmi_read completion report
 adds `hmi_read` cursor paging on a cold-adopted local session: continuations reused the worker
 snapshot across calls. The provisional `read_cross_references` `{hmi}` selector was verified on
 standalone projects only. The
-[PR6 live report](../superpowers/acceptance/reports/2026-10-09-multiuser-pr6-live-verification.md)
+PR6 live report
 records every write, compile and save path on cold-adopted Multiuser and Exclusive sessions in
 `full` mode. Read-write confirmation, worker-opened and offline sessions were not exercised.
 
@@ -212,8 +212,8 @@ guarded execution, and operation-specific live evidence before enabling their pu
 
 PR4 implementation candidate `3772edad0ce9e90390bc36deb71dbd8140511424` was offline qualified
 and accepted by the maintainer on October 8 **within the documented scope**. The
-[definition](../superpowers/acceptance/2026-10-07-multiuser-pr4-live-definition.md) retains the
-original matrix; the [live report](../superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md)
+definition retains the
+original matrix; the live report
 records 73 installed public calls with canonical equality and 21 exact lifecycle audit matches.
 Online recovery/opening passed in two retained UI Portals in full/read-write. Offline read-write
 previews passed; both actual opens completed only after operator-dismissed Siemens dialogs, so
@@ -227,9 +227,9 @@ FakeWorker tests establish host protocol, binding, confirmation, and audit behav
 checks cannot prove installed Openness runtime behavior. Generated references are compile-only;
 installed-reference compilation and package exclusion are separate qualification checks.
 
-The [PR 3 offline report](../superpowers/acceptance/reports/2026-10-06-multiuser-pr3-offline-validation.md)
+The PR 3 offline report
 records the combined candidate and qualification. The October 6
-[installed-tool live report](../superpowers/acceptance/reports/2026-10-06-multiuser-pr3-live-verification.md)
+installed-tool live report
 records the authorized three-session fixture: all six inspection actions succeeded while the host
 remained unbound, including current-user session directories and locked/unlocked observations.
 Inventory was exercised with opened `.als21` sessions. The separate zero-project/standalone `.ap21`
@@ -245,8 +245,8 @@ acceptance is not inventory acceptance.
 Frozen PR 2 candidate `a47bf0dbc3efba4ff654464b6393d01163dc7900` passed bounded standalone
 live selection/switching and lifecycle acceptance, including headless last-client and adverse-state
 cases: 131 captured tool calls, 64 lifecycle calls, matching canonical documents/audits, and
-restored fixtures. The [acceptance report](../superpowers/acceptance/reports/2026-10-05-multiuser-pr2-active-project-context-live.md)
+restored fixtures. The acceptance report
 records exact evidence, failures and limits: project-comment dirtying, independent Openness
 external changes, and scripted elicitation. These results qualify the internal migration's
 standalone behavior; they do not qualify public Multiuser operations. The
-[implementation plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-28-multiuser-pr1-reference-contract-foundation.md) defines that boundary.
+implementation plan defines that boundary.

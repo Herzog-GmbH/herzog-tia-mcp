@@ -2,7 +2,7 @@
 
 `network_write` uses contract **2.0**; `network_read` remains **1.0**. The native-rejections
 candidate `75c0568` passed offline qualification and all 17 expected outcomes in the scoped installed
-TIA Portal V21 rerun. See the [2026-10-29 acceptance report](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md)
+TIA Portal V21 rerun. See the 2026-10-29 acceptance report
 for provenance, timing, restoration and untested limits. The later host-only outcome-validation and
 tool-help follow-up has separate offline evidence; it was not installed or retimed and adds no
 native acceptance. Older dated evidence below applies only to its recorded source and contract.
@@ -20,11 +20,9 @@ PR 1 repairs. The 2026-09-23 public run stopped at a TIA safety-permission rejec
 Ethernet deletion. On 2026-09-24, a fresh guarded public run passed all eight lifecycle operations,
 including both connected deletes, and a separate final read observed zero subnets and 81 aggregate
 hardware devices. Retained-device identities and node/IO-system attributes were not independently
-read back. See the [bounded live PASS report](../superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md)
+read back. See the bounded live PASS report
 and [Phase 4 operation reference](NETWORK_PHASE4_SUBNET_LIFECYCLE.md) for the full request
 shapes, writable values, targeting, deletion semantics, minimal result, and evidence status.
-
-See [../roadmap/network-operations.md](../roadmap/network-operations.md) for later-phase scope.
 
 Fatal Portal loss escaping Network discovery, selection, connection/attribute reads
 or mutation propagates to the worker's shared `portal_lost` mapping.
@@ -32,7 +30,7 @@ Ordinary unreadable evidence and optional-property failures retain their existin
 behavior. The host invalidates verified binding/cursors without replay; inspect
 any attempted mutation and explicitly bind again before retrying. Existing typed
 post-mutation outcomes and cleanup warnings retain their established contracts. The
-[B-16/Q3 record](../superpowers/acceptance/reports/2026-10-20-b16-q3-worker-portal-loss-live-verification.md) distinguishes
+B-16/Q3 record distinguishes
 offline fault-injection evidence from maintainer-accepted scoped live read
 testing. Native write interruptions and broader fault locations remain untested.
 
@@ -132,7 +130,7 @@ path and start again, or narrow the request until its result fits one terminal p
 
 The public read request/result schemas and `network_read` `contractVersion:"1.0"` are unchanged.
 
-The [2026-10-23 scoped installed-candidate smoke](../superpowers/acceptance/reports/2026-10-23-c5-network-object-cursors-live-verification.md)
+The 2026-10-23 scoped installed-candidate smoke
 passed initial/continued paging, tamper rejection, same-owner reverify and a fresh sequence in
 `full` mode on one standalone fixture with `pageSize:1`. The report retains unexecuted fault,
 mode and local-session cases; C-9's default changes and combined qualification are separate.
@@ -495,7 +493,7 @@ the first setter. Other failed Network operations have `result:null`.
 This excerpt is the captured L11c failure: Address and SubnetMask applied before an incompatible
 subnet connection threw `EngineeringTargetInvocationException`. Its envelope has `phase:"applied"`,
 `success:false`, `error:null`, MCP `isError:false`; the later item was never dispatched. The full
-canonical response, warnings and landed reads are in the [functional rerun input](../superpowers/acceptance/reports/inputs/2026-10-29-network-write-native-rejections-live-rerun.md#l11c-corrected-two-key-partial-write-rejection).
+canonical response, warnings and landed reads are in the functional rerun input.
 
 ```json
 {
@@ -604,7 +602,7 @@ execution. Stateful FakeWorker tests exercise selection of one multi-homed port 
 of its sibling; that is offline evidence. Contract 2.0 reports completion through `trusted` or
 `superseded`, without read-back. Follow uncertain or incomplete outcomes with fresh filtered
 `network_read`. The 2026-10-05 run below used the earlier verification contract; current scoped
-evidence is recorded in the [2026-10-29 report](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md).
+evidence is recorded in the 2026-10-29 report.
 
 ## The typed payload result types
 
@@ -704,8 +702,7 @@ warning remains visible and is not treated as selector or payload drift.
 
 Phase 2 live acceptance remains a separate authorization boundary; read-only authorization does
 not authorize a write preview or apply. A structured I/O-map live run completed on 2026-08-14
-against a real TIA Portal V21 project (Project20.ap21); the results are recorded in
-[`../superpowers/acceptance/reports/2026-08-14-io-map-defect-fixes-live.md`](../superpowers/acceptance/reports/2026-08-14-io-map-defect-fixes-live.md).
+against a real TIA Portal V21 project (Project20.ap21).
 
 A historical Phase 4 public MCP run is evidence only for its recorded older commit. The first
 current-revision attempt on 2026-09-23 was incomplete after a TIA safety-permission rejection.
@@ -714,7 +711,7 @@ create/update/delete, both connected deletes, and a separate final read. It obse
 and 81 aggregate hardware devices after Apply. The root count of 10 comes from lifecycle results,
 without an independent pre-Apply root baseline. See
 [NETWORK_PHASE4_SUBNET_LIFECYCLE.md](NETWORK_PHASE4_SUBNET_LIFECYCLE.md) and the
-[current-revision live report](../superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md).
+current-revision live report.
 Subnet lifecycle operations do not save the project or compile hardware.
 
 The historical 2026-10-05 live-defect fixes (build from `3642062`, disposable `SimpleProject_copy`, V21)
@@ -725,11 +722,11 @@ applied with `subnetAbsent`, `affectedNodesPreserved` and `affectedConnectionsRe
 system 100 on `PN/IE_1` passed its `IoSystemSubnet`/`IoSystemNumber` checks; an invalid IP
 produced a passed `Address` preservation final check; a single-device hardware read returned an
 empty `messages[]`; and `pnDeviceNameAutoGeneration:false` followed by a name write applied and
-verified. The run is recorded in the [improvement log](../IMPROVEMENT_LOG.md).
+verified. The run is recorded in the improvement log.
 
 ### Contract 2.0 scoped outcomes
 
-The [2026-10-29 acceptance report](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md)
+The 2026-10-29 acceptance report
 and its frozen functional input record 17 passing expected outcomes against one disposable fixture.
 O1 means a native rejection, O2 an accepted write with public `compile_check` diagnostics, and O3
 an accepted write with silent public software compilation. Controls and MCP postconditions are
@@ -762,5 +759,5 @@ and compilation steps before commissioning.
 
 ## Future roadmap
 
-The approved high-level direction for expanded topology operations beyond this contract is
-documented in [network-operations.md](../roadmap/network-operations.md).
+Expanded topology operations beyond this contract are not planned. Network writes are not offered
+in the `produktiv` access mode.

@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-REPO_URL = "https://github.com/Czarnak/tia-portal-mcp/"
+REPO_URL = "https://github.com/Herzog-GmbH/herzog-tia-mcp/"
 TRANSIENT_DIRS = ("docs/superpowers/plans/", "docs/superpowers/specs/", "docs/superpowers/evidence/")
 INLINE = re.compile(r"\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*(<[^>]*>|[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)")
 CODE_SPAN = re.compile(r"`[^`\n]*`")

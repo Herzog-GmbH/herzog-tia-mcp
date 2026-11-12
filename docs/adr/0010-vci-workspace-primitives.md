@@ -25,12 +25,8 @@
 - The surface is small and safe by construction: no container reaches Openness, and a lost Portal yields a named last leaf and a defined recovery path.
 - Long exports stay slow. The export scan grows with leaves times mappings; this was recorded, not fixed, and no speedup is claimed.
 - Local sessions, server projects, software units, system blocks, library scopes and classic HMI remain unsupported.
-- VCI keeps its own scope vocabulary and a private path policy; consolidating the duplicated path rules is an open follow-up in [IMPROVEMENT_LOG](../IMPROVEMENT_LOG.md).
+- VCI keeps its own scope vocabulary and a private path policy; consolidating the duplicated path rules is an open follow-up.
 - Live acceptance failed the frozen first candidate and passed a scoped follow-up of the repaired one; wider native coverage is untested.
 
 ## Evidence
-- In tree: [VCI spike](../superpowers/acceptance/reports/2026-10-15-vci-spike.md); [VCI live acceptance](../superpowers/acceptance/reports/2026-10-16-vci-tools-live-acceptance.md).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [VCI tools design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-15-vci-tools-design.md)
-  - [VCI tools plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-15-vci-tools.md)
-  - [VCI live findings fixes plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-16-vci-live-findings-fixes.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

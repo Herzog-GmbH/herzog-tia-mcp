@@ -32,13 +32,4 @@
 - The write path later moved onto the guarded pipeline ([ADR-0004](0004-guarded-single-call-write-pipeline.md)); the content exchange rules above are unchanged by it.
 
 ## Evidence
-- In tree: [OB creation spike](../superpowers/acceptance/reports/2026-10-08-ob-creation-spike.md); [OB creation live acceptance](../superpowers/acceptance/reports/2026-10-09-ob-creation-live-acceptance.md).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [UDT/DB external-source design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-07-26-udt-db-external-source-design.md)
-  - [UDT/DB external-source plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-07-26-udt-db-external-source.md)
-  - [SCL external-source design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-07-27-scl-external-source-design.md)
-  - [SCL external-source plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-07-27-scl-external-source.md)
-  - [Truthful block-import outcomes plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-27-wave2-i2-truthful-block-import-outcomes.md)
-  - [Type-content binding policy plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-27-wave2-t2-type-content-binding-policy.md)
-  - [OB creation design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-08-ob-creation-design.md)
-  - [OB creation plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-08-ob-creation.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

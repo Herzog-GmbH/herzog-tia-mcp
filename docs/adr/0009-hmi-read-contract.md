@@ -31,9 +31,4 @@
 - Writes were deferred to a later track and are decided separately; the same worker-method naming and cursor invalidation rules carry into them.
 
 ## Evidence
-- In tree: [spike](../superpowers/acceptance/reports/2026-10-07-hmi-read-spike.md), [live acceptance](../superpowers/acceptance/reports/2026-10-08-hmi-read-live-acceptance.md), [completion live acceptance](../superpowers/acceptance/reports/2026-10-12-hmi-read-completion-live-acceptance.md).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [design spec 2026-10-07](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-07-hmi-read-design.md)
-  - [completion design spec 2026-10-11](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-11-hmi-read-completion-design.md)
-  - [plan 2026-10-07](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-07-hmi-read.md)
-  - [completion plan 2026-10-11](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-11-hmi-read-completion.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

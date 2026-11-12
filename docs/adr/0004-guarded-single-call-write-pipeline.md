@@ -33,23 +33,4 @@
 - Later narrowed by [ADR-0012](0012-portal-as-rejection-authority.md): guard severities reduced to block/info outside lifecycle, and collision guards, replanning and read-back removed. The per-domain budget priorities and reserves are in [ARCHITECTURE](../ARCHITECTURE.md).
 
 ## Evidence
-- In tree: [PR2 tool delegation](../superpowers/acceptance/reports/2026-09-01-pr2-registered-tool-delegation-live.md); [PR3 update_tag snapshot](../superpowers/acceptance/reports/2026-09-01-pr3-update-tag-safety-snapshot-live.md); [PR4 preview diff](../superpowers/acceptance/reports/2026-09-01-pr4-structured-preview-diff-live.md); [PR5 tag scopes](../superpowers/acceptance/reports/2026-09-01-pr5-tag-operation-safety-scopes-live.md); [PR6 project-tree scopes](../superpowers/acceptance/reports/2026-09-01-pr6-project-tree-safety-scopes-live.md); [Project tree v3](../superpowers/acceptance/reports/2026-09-06-issue-32-project-tree-v3-live.md); [Lifecycle tiers and bind_project](../superpowers/acceptance/reports/2026-10-03-lifecycle-tiers-bind-project-live-validation.md); [Network guarded write offline](../superpowers/acceptance/reports/2026-10-03-network-json-guarded-write-offline-validation.md); [PLC read and cross-references](../superpowers/acceptance/reports/2026-10-05-plc-read-and-cross-references-validation.md); [PLC write](../superpowers/acceptance/reports/2026-10-07-plc-write-validation.md); [PLC native rejections](../superpowers/acceptance/reports/2026-10-26-plc-write-native-rejections-live-verification.md)
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-01-write-safety-hardening-design.md (OnlineProvider finding)
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-01-pr2-registered-tool-delegation.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-01-pr3-update-tag-safety-snapshot.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-01-pr4-structured-preview-diff.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-01-pr5-tag-operation-safety-scopes.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-01-pr6-project-tree-safety-scopes.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-13-issue-30-plc-block-header-metadata-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-13-issue-30-plc-block-header-metadata.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-26-wave1-k1-batch-failure-categories.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-26-wave1-l1-lifecycle-rebind-preview-safety.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-26-wave1-p1-plc-read-integrity.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-29-write-safety-redesign-design.md (Appendix A: elicitation client spike)
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-29-write-safety-phase1-foundation.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-05-plc-read-write-and-cross-references-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-05-plc-read-and-cross-references.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-06-plc-write.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-c10-update-tag-is-safety.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-guarded-write-budget.md
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

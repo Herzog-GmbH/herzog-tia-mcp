@@ -145,13 +145,13 @@ with one message counting what was omitted; the omitted tail cannot be paged.
 
 Only kinds whose owners were verified live (2026-10-05, V21) ship as members or endpoints. WinCC
 Unified `HmiTag` ships through the provisional `hmi` selector above (live 2026-10-12, see the
-[completion report](../superpowers/acceptance/reports/2026-10-12-hmi-read-completion-live-acceptance.md)).
+completion report).
 Not shipped, and unverified for this tool: technology objects (the cross-reference service works,
 but the project tree has no node type for them), `DeviceItem`,
 `Subnet` and `Node` (no service observed), technology-object instance DBs and WinCC Classic HMI tags
 (not present in the spike project). `Device`, `PlcSoftware`, `SoftwareUnit` and `TagTable` are not
 owners themselves; they only enumerate the owners beneath them. See Appendix B of the
-[design spec](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-05-plc-read-write-and-cross-references-design.md).
+design spec.
 
 ## PLC writes (`plc_write`)
 
@@ -192,7 +192,7 @@ always written. An unknown `obEventClass` is `validation_error` listing the vali
 `obEventClass` with a non-OB `blockType`. A class the CPU does not support fails the item with TIA
 Portal's own message (for example "Cannot create an organization block of type
 'ProgrammingError'." on an S7-1200). The 2026-10-09
-[live acceptance report](../superpowers/acceptance/reports/2026-10-09-ob-creation-live-acceptance.md)
+live acceptance report
 records the V21 run.
 
 `create_block`, `create_block_group` and `delete_block_group` take a deterministic group path or the
@@ -296,9 +296,9 @@ block (`create_block` is an XML import, so the message mentions `Import` of
 `PlcBlockComposition`, a line and a position) and deleting the default tag table. When item N of M
 is rejected, items before N are `applied`, item N is `engineering_rejected`, later items are
 `skipped` with `earlierOperationFailed`, and nothing is rolled back. See the
-[live cases](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/acceptance/reports/inputs/2026-10-26-plc-write-native-rejections-live-cases.md).
+live cases.
 
-[Additional probes](../superpowers/acceptance/reports/inputs/2026-10-26-plc-write-collision-namespace-probes.md) demonstrated four more native rejection directions on one disposable project: creating a tag in a second table against an existing tag name, creating a user constant against that tag name, creating a tag against an existing FC name, and creating a table in an existing child folder against an existing root-table name. The reverse cross-kind directions, cross-group block duplicates and arbitrary folder layouts remain unverified. The source tag and empty tables were checked after the probes; the FC remained readable, without a before/after hash comparison. Cleanup restored the observed inventories and typed tree; unsaved edit history remained.
+Additional probes demonstrated four more native rejection directions on one disposable project: creating a tag in a second table against an existing tag name, creating a user constant against that tag name, creating a tag against an existing FC name, and creating a table in an existing child folder against an existing root-table name. The reverse cross-kind directions, cross-group block duplicates and arbitrary folder layouts remain unverified. The source tag and empty tables were checked after the probes; the FC remained readable, without a before/after hash comparison. Cleanup restored the observed inventories and typed tree; unsaved edit history remained.
 
 Portal does not throw for every collision. A rename through `update_tag` to a name another tag in
 the table holds is silently ignored. The worker applies the rename first, reads `Name` back and, if
@@ -364,10 +364,10 @@ Take it from the verification or a fresh read.
   and carries TIA Portal's reason in `engineeringError`; an `EngineeringTargetInvocationException`
   is `engineering_rejected`. `update_type_content` still flattens import failures to
   `worker_operation_failed` without `engineeringError`; see the
-  [improvement log](../IMPROVEMENT_LOG.md).
+  improvement log.
 - Created OBs use TIA Portal defaults: no event parameters (cyclic time, phase offset, priority,
   time-of-day schedule, hardware-interrupt triggers) and no renumbering of existing blocks. See the
-  [improvement log](../IMPROVEMENT_LOG.md).
+  improvement log.
 - `SynchronousCycle` is not offered: it does not compile until an isochronous IO system is assigned,
   which no tool here configures. Motion Control, redundancy and ProDiag OBs are created by TIA Portal.
 - A multi-instance OB number can differ from the plan if another OB takes it in between; the result
@@ -379,13 +379,13 @@ Take it from the verification or a fresh read.
 against the tag inventory their guards need: an unreadable constant value blocks, table deletion
 and address overlaps are info. Name collisions and the default tag table are no longer guarded;
 The recorded duplicate/default-delete cases failed as `engineering_rejected`; this is scoped evidence, not a guarantee for every namespace collision. The 2026-10-07
-[validation report](../superpowers/acceptance/reports/2026-10-07-plc-write-validation.md)
+validation report
 records the original offline and live acceptance of this path, and the 2026-10-26
-[native rejections report](../superpowers/acceptance/reports/2026-10-26-plc-write-native-rejections-live-verification.md)
+native rejections report
 records the contract `2.0` change.
 
 Historical: PR 5 bound typed tag snapshots to preview/apply tokens. Its
-[live acceptance report](../superpowers/acceptance/reports/2026-09-01-pr5-tag-operation-safety-scopes-live.md)
+live acceptance report
 covers that token flow only and does not qualify `plc_write`. Multilingual per-tag comment binding
 and public `list_tag_tables` completeness changes remain deferred.
 
@@ -396,11 +396,11 @@ against a project-tree snapshot only where a guard needs it (deletes and OB crea
 info, the recorded same-target duplicate block create failed as `engineering_rejected`, and an unreadable node makes
 the snapshot incomplete, which blocks as `plc_state_unverifiable` instead of hiding what a delete
 removes. The
-[validation report](../superpowers/acceptance/reports/2026-10-07-plc-write-validation.md) records
+validation report records
 the offline and live acceptance of this path.
 
 Historical: PR 6 bound typed project-tree snapshots to preview/apply tokens. Its
-[live acceptance report](../superpowers/acceptance/reports/2026-09-01-pr6-project-tree-safety-scopes-live.md)
+live acceptance report
 covers that token flow only and makes no save, persistence, plant, or hardware claim.
 
 ## Current limits

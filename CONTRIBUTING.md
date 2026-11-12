@@ -70,18 +70,15 @@ Inspector test loop, see [docs/development/local-mcp-testing.md](docs/developmen
 ### Documentation
 
 Documents under `docs/` are grouped by audience: `guides/` for people using the server,
-`development/` for people building it, `roadmap/` for direction. `docs/superpowers/` holds the live-verification reports; its `plans/`, `specs/` and
-`evidence/` directories are a per-PR working area, deleted before merge (see `AGENTS.md`).
-Decisions live in `docs/adr/`.
+`development/` for people building it, `SupportedOperations/` for the operation reference.
+Decisions live in `docs/adr/`. Working notes, plans and raw test output do not belong in the repository.
 
 **A new document under `docs/` is not complete until it is reachable from
 [docs/README.md](docs/README.md), directly or through the index of its directory
 (`scripts/verify-docs.py` checks this in CI).** Those indexes are the only thing keeping the tree
 navigable.
 
-`README.md` is also the NuGet package readme, where relative links do not resolve. Every
-cross-document link in `README.md` must be an absolute
-`https://github.com/Czarnak/tia-portal-mcp/blob/main/...` URL. All other documents use relative links.
+All documents use relative links.
 
 ## Commit messages
 

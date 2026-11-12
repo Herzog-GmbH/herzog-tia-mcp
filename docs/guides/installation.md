@@ -9,8 +9,8 @@ For a condensed quick start, see the [README](../../README.md).
 - Siemens TIA Portal V21 installed
 - TIA Portal Openness installed and enabled
 - Current Windows user is a member of the `Siemens TIA Openness` user group
-- Stable .NET 10 SDK (`10.0.400` or newer in the .NET 10 feature bands) for `dotnet tool install`
-- .NET Framework 4.8 Runtime for the Openness worker
+- .NET Framework 4.8 Runtime for the Openness worker and `TiaHmiMcp.exe`
+- No .NET SDK or runtime for the host: `TiaMcpServer.exe` in the release zip is self-contained
 
 Source builds additionally need:
 
@@ -53,11 +53,24 @@ tested fixtures; noninteractive/full-offline support is not established by that 
 
 ## Install
 
-```powershell
-dotnet tool install -g TiaMcpServer
-```
+1. Download `herzog-tia-mcp-<version>.zip` and `SHA256.txt` from the releases page of this repository.
+2. Check the checksum:
 
-Run the installed server:
+   ```powershell
+   (Get-FileHash .\herzog-tia-mcp-<version>.zip -Algorithm SHA256).Hash
+   ```
+
+3. Extract the zip into a folder of its own per version, for example
+   `C:\Program Files\herzog-tia-mcp\<version>`. It contains `TiaMcpServer.exe`, the
+   `openness-worker` folder and `TiaHmiMcp.exe`. A running MCP client locks these files, so a new
+   version goes into a new folder.
+4. Register both programs with your MCP client (see [MCP client configuration](mcp-client-configuration.md)
+   and the README). TIA Portal asks once per program whether it may be accessed.
+
+The NuGet package `TiaMcpServer` on nuget.org is not this project. The examples below write
+`tia-mcp`; with the release zip that is the full path of `TiaMcpServer.exe`.
+
+Run the server:
 
 ```powershell
 tia-mcp

@@ -139,11 +139,11 @@ is running unless you pass `-AllowDirty` or `-StopRunningServer`:
    client (e.g. Claude Code's `/mcp` reconnect, or restart the client) to pick up
    the new binary, then use `bind_project` for an already-open project — the previous binding is gone.
 
-### Reverting to the published version
+### Reverting to a release
 
 ```powershell
 dotnet tool uninstall -g TiaMcpServer
-dotnet tool install -g TiaMcpServer
 ```
 
-This reinstalls the latest stable release from nuget.org.
+Then use the release zip of this repository (see [Installation](../guides/installation.md)). The
+`TiaMcpServer` package on nuget.org is not this project.

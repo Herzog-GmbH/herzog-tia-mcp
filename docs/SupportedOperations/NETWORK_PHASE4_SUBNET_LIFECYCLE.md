@@ -1,7 +1,7 @@
 # Network Operations Phase 4: Subnet Lifecycle
 
 Current `network_write` contract: **2.0**, offline qualified with scoped installed-candidate
-TIA Portal V21 acceptance. The [2026-10-29 report](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md)
+TIA Portal V21 acceptance. The 2026-10-29 report
 records all 17 expected outcomes, timing and restoration. Dated Phase 4 runs below retain their
 earlier contracts and evidence limits.
 
@@ -15,11 +15,7 @@ below for the bounded live PASS and remaining readback limits.
 
 Design rationale, evidence basis, and rejected alternatives are recorded in
 [ADR-0012](../adr/0012-portal-as-rejection-authority.md).
-The historical task-by-task implementation plan and its earlier Locked Public Contract are at
-[the archived plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-06-network-phase4-subnet-lifecycle.md).
-See [../roadmap/network-operations.md](../roadmap/network-operations.md) for how this phase fits the
-overall network roadmap, and
-[NETWORK_OPERATIONS_SUMMARY.md](NETWORK_OPERATIONS_SUMMARY.md) for the previously supported
+See [NETWORK_OPERATIONS_SUMMARY.md](NETWORK_OPERATIONS_SUMMARY.md) for the previously supported
 network operations and the current guarded canonical contract. Historical Phase4 acceptance uses its recorded earlier contract.
 
 ## Supported operations
@@ -290,4 +286,4 @@ The Phase 4 evidence has distinct scopes:
   `networkDeviceCountUnchanged=true`, but the harness lacked an independent pre-Apply root-count
   baseline. It did not independently read back retained-device identities or node and IO-system
   attributes. No save, compile, download, or persistence result is claimed. See the
-  [current-revision live report](../superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md).
+  current-revision live report.

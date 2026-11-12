@@ -81,14 +81,14 @@ class VerifyDocsTests(unittest.TestCase):
         self.assertIn("docs/new.md:1: broken link missing.md", errors)
 
     def test_tree_permalink_for_a_directory_is_checked_in_the_tag(self):
-        repo = self.make_repo({"old/dir/a.md": "x\n", "docs/README.md": "[d](https://github.com/Czarnak/tia-portal-mcp/tree/arch/old/dir) "
-                               "[n](https://github.com/Czarnak/tia-portal-mcp/tree/arch/old/none)\n"})
+        repo = self.make_repo({"old/dir/a.md": "x\n", "docs/README.md": "[d](https://github.com/Herzog-GmbH/herzog-tia-mcp/tree/arch/old/dir) "
+                               "[n](https://github.com/Herzog-GmbH/herzog-tia-mcp/tree/arch/old/none)\n"})
         git(repo, "tag", "arch")
         self.assertEqual(verify_docs.check(repo, "arch", False)[0], ["docs/README.md:1: old/none is not in tag arch"])
 
     def test_archive_tag_permalink_must_exist_in_the_tag(self):
-        repo = self.make_repo({"old/old.md": "x\n", "docs/README.md": "[o](https://github.com/Czarnak/tia-portal-mcp/blob/arch/old/old.md) "
-                               "[m](https://github.com/Czarnak/tia-portal-mcp/blob/arch/old/nope.md)\n"})
+        repo = self.make_repo({"old/old.md": "x\n", "docs/README.md": "[o](https://github.com/Herzog-GmbH/herzog-tia-mcp/blob/arch/old/old.md) "
+                               "[m](https://github.com/Herzog-GmbH/herzog-tia-mcp/blob/arch/old/nope.md)\n"})
         git(repo, "tag", "arch")
         errors, _ = verify_docs.check(repo, "arch", False)
         self.assertEqual(errors, ["docs/README.md:1: old/nope.md is not in tag arch"])

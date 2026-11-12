@@ -210,14 +210,11 @@ Network contract these rules describe in the abstract.
 - **Worker payload JSON** goes through `WorkerJson.SerializePayload`. A new payload contract writes null members and is decoded through the worker-payload reader; `[LegacyNullOmission]` is only for the reasons in `LegacyNullOmissionReason` (a payload that omits nulls cannot go through the reader), and adding or removing one updates `WorkerPayloadNullPolicyRegisterTests`
 - Siemens DLLs are **never committed** to the repo or the NuGet package
 
-## Plans, specs and evidence (lifecycle)
+## Plans, specs and evidence
 
-These rules override the default output locations of the superpowers skills (brainstorming: "Write the validated design (spec) to"; writing-plans: "Save plans to") and of any similar tool.
+Plans, specs, working notes, traces, raw Openness output and timing data do not go into this repository. A lasting decision becomes one ADR in `docs/adr/` (see its README); behavior goes to `docs/ARCHITECTURE.md` or `docs/SupportedOperations/`. Use `scripts/timing/` for measurements and keep their output outside the repository.
 
-- Specs go to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, plans to `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, run evidence to `docs/superpowers/evidence/YYYY-MM-DD-<topic>/`. These three directories are a transient per-PR working area: collapsed in diffs and empty on `main`.
-- Never link a transient file from outside `docs/superpowers/`; cite it as "PR #N, commit `<sha>`".
-- Before pushing documentation changes, run `python -I scripts/verify-docs.py --archive-tag docs-archive-2026-10-30` (`python3` on Linux/macOS).
-- Before the PR merges, delete everything you added there in a final commit (`docs: prune working files`). First move what must survive: a lasting decision to `docs/adr/` (one ADR, see its README), behavior to `docs/ARCHITECTURE.md` or `docs/SupportedOperations/`, follow-ups to `docs/IMPROVEMENT_LOG.md`, the live-verification report to `docs/superpowers/acceptance/reports/`, and verified raw Openness call/response files to `docs/superpowers/acceptance/reports/inputs/` (listed in its `README.md`). MCP-level traces, preflights, restoration dumps and timing outputs are not kept; use `scripts/timing/` for measurements.
+Before pushing documentation changes, run `python -I scripts/verify-docs.py` (`python3` on Linux/macOS).
 
 ## Documentation layout
 
@@ -227,32 +224,20 @@ These rules override the default output locations of the superpowers skills (bra
 | --- | --- |
 | `docs/guides/` | people **using** the server — installation, client configuration, troubleshooting |
 | `docs/development/` | people **building** the server — building, MCP sandbox testing, packaging |
-| `docs/roadmap/` | direction — per-area tactical roadmaps (root `ROADMAP.md` is strategic) |
 | `docs/SupportedOperations/` | per-area operation reference |
+| `docs/roadmap/json-contract.md` | the structured JSON output contract |
 | `docs/ARCHITECTURE.md` | the design; keep current per its own §11 |
-| `docs/IMPROVEMENT_LOG.md` | engineering log — open follow-ups first, completed work at the end |
-| `docs/adr/` | architecture decision records — why the design is as it is; project history |
-| `docs/superpowers/` | live-verification reports under `acceptance/reports/`; transient working area for plans, specs, evidence (empty on `main`) |
-
-Two rules that keep this from re-rotting:
+| `docs/adr/` | architecture decision records — why the design is as it is |
 
 - **A new document under `docs/` is not complete until it is reachable from `docs/README.md`**,
   directly or through the index of its directory. An unreachable document is unfindable in practice.
-- **`README.md` is also the NuGet package readme**, declared via `<PackageReadmeFile>` in
-  `TiaMcpServer/TiaMcpServer.csproj`. Relative links do not resolve on nuget.org, so every
-  cross-document link in `README.md` must be an absolute
-  `https://github.com/Czarnak/tia-portal-mcp/blob/main/...` URL. Every other document uses
-  relative links.
+- All documents use relative links.
 
 `README.md` is a landing page: pitch, tool list, write-safety model, architecture summary, quick
 start, and the documentation map. Procedure belongs in `docs/`, not in the README.
 
 ## Project history
 
-This file states current rules only; it records no history. To find why something is the way it is:
-- Decisions and project evolution: `docs/adr/README.md` (each ADR cites the original plans/specs).
-- What was verified live, with scope and limits: the reports in `docs/superpowers/acceptance/reports/`; kept raw Openness evidence in its `inputs/README.md`.
-- Open follow-ups: `docs/IMPROVEMENT_LOG.md`. Current design: `docs/ARCHITECTURE.md`. Per-area contracts: `docs/SupportedOperations/`.
-- Removed plans, specs and evidence: `git show docs-archive-2026-10-30:<path>`; find a path with `git ls-tree -r --name-only docs-archive-2026-10-30 -- docs/superpowers | grep <term>`, or search history with `git log -S"<term>" -- docs/`.
+This file states current rules only; it records no history. Decisions: `docs/adr/README.md`. Current design: `docs/ARCHITECTURE.md`. Per-area contracts: `docs/SupportedOperations/`. Changes since the start of this repository: `git log`.
 
 Do not copy acceptance results or dated "live verified" statements into this file.

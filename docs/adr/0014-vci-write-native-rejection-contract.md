@@ -41,6 +41,4 @@ native behavior, preserves repeated scans and contradicts the accepted native-ov
   untested native fault locations remain bounded by the qualification report.
 
 ## Evidence
-
-- [Native-rejection live verification and Stage 0 provenance](../superpowers/acceptance/reports/2026-11-01-vci-write-native-rejections-live-verification.md)
-- [Original VCI live acceptance](../superpowers/acceptance/reports/2026-10-16-vci-tools-live-acceptance.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

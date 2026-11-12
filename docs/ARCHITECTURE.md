@@ -154,7 +154,7 @@ PLC, HMI and VCI). The generic batch tools (`preview_write_batch`, `apply_write_
 the `BatchTools` wrapper and every token path were removed; their operations moved to `plc_read`
 and `plc_write`. The earlier registered-surface delegation and
 preview-only live V21 evidence are recorded in the
-[PR 2 acceptance report](superpowers/acceptance/reports/2026-09-01-pr2-registered-tool-delegation-live.md).
+PR 2 acceptance report.
 
 ### Read-only tool surface
 
@@ -376,7 +376,7 @@ Explicit endpoint inventory has separate attachment/endpoint-scoped history; ref
 do not create identity churn or prove an active-session reconnection. Capability descriptions
 grant no permission. Strict required-member/coherence decoding precedes existing 60,000-value
 and 180,000-document budgets. Current counts are 8/19/19 (read-only/read-write/full).
-PR4's [scoped live report](superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md)
+PR4's scoped live report
 retains both failed noninteractive offline opens, UI-assisted success, restoration and
 unexecuted rows. Content/session/markings/mutations remain undelivered; see the
 [Multiuser boundary](SupportedOperations/MULTIUSER_OPERATIONS_SUMMARY.md).
@@ -459,7 +459,7 @@ Existing narrower property-read
 policies, typed post-mutation failures, cleanup warnings and completed-operation
 diagnostic stamping retain their contracts. VCI's writer keeps its outcome-bearing
 mapping; VCI read/plan use the shared boundary. See the
-[B-16/Q3 live verification report](superpowers/acceptance/reports/2026-10-20-b16-q3-worker-portal-loss-live-verification.md)
+B-16/Q3 live verification report
 for offline qualification and scoped Network, PLC, VCI and local-session read
 evidence. The HMI discovery and stale-project cache fixes have offline regressions
 and a scoped installed-candidate read retest: loss, immediate cursor invalidation
@@ -733,7 +733,7 @@ read version `1.1`. The write contract is `2.0`, using shared canonical serializ
 decoding, budgets and exact-delivery audit v2 records; attempted failures keep typed state with
 root `error:null` and MCP `isError:false`.
 
-The [2026-10-30 scoped report](superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md)
+The 2026-10-30 scoped report
 separates the 35 functional cases on installed `4.2.0-local.112.g96a28b7` from the focused R1
 partial-failure/supersedence check and manual UI, L5 and timing qualification on
 `4.2.0-local.113.g31d1a44`. Offline qualification passed
@@ -751,7 +751,7 @@ locator call, including a cache hit, freshly resolves current project membership
 uniqueness through strict discovery after its cached-name/device liveness check. Owner-change
 clearing occurs on the next locator use; an omitted selector does not refill a keyed entry.
 Retention does not skip traversal. The maintainer chose to retain the
-cache and leave O1 open. [Acceptance](superpowers/acceptance/reports/2026-10-14-hmi-write-live-acceptance.md)
+cache and leave O1 open. Acceptance
 records both-mode functional verification and separate archival-baseline timing/memory observations;
 matched write baselines and the strict repeated owner-transition gate remain unqualified, with the
 single-trace memory-return condition not met. No traversal-saving performance claim follows.
@@ -806,7 +806,7 @@ identity; no projectless response promotes to a verified project binding. The
 [VCI reference](SupportedOperations/VCI_OPERATIONS_SUMMARY.md) details operation fields, status
 decisions, path policy and retry limits. [ADR-0014](adr/0014-vci-write-native-rejection-contract.md)
 records the native-rejection/overwrite decision; the
-[current scoped report](superpowers/acceptance/reports/2026-11-01-vci-write-native-rejections-live-verification.md)
+current scoped report
 keeps native observations, mixed timing results and untested crash/race/format limits separate.
 
 ### Typed Network payload registry
@@ -1069,7 +1069,7 @@ network_write request
 
 The connected-subnet delete path is implemented through this seam without deleting devices;
 the host captures initial affected identities/consequences for guards. The service never calls
-`Project.Save()` or triggers compilation. The [2026-10-29 scoped report](superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md)
+`Project.Save()` or triggers compilation. The 2026-10-29 scoped report
 records installed candidate `75c0568` contract 2.0 offline qualification and 17 passing expected live outcomes, including
 the L3 ignored rename. Its mixed-property rollback and native write-interruption limits remain
 unverified. The later host-only raw-outcome validation/tool-help follow-up is verified separately
@@ -1081,9 +1081,7 @@ connected Ethernet deletion. The fresh 2026-09-24 guarded public rerun passed al
 operations, including both connected deletes; a separate final read observed zero subnets and 81
 aggregate hardware devices. It did not independently read back per-device identities or node and
 IO-system attributes, and its root count of 10 has no independent pre-Apply baseline. See
-`docs/SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md` for the contract and
-`docs/superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md` for the
-observed run.
+`docs/SupportedOperations/NETWORK_PHASE4_SUBNET_LIFECYCLE.md` for the contract.
 
 ### Phase 5 temporary IO-system qualification probe
 
@@ -1102,7 +1100,7 @@ qualified PN and DP modeled `Name`/`Number` and PN
 `UseIoSystemNameAsDeviceNameExtension`; it excluded PN `MultipleUseIoSystem` after a
 committed edit made linked PN-name evidence unavailable, and excluded
 `MaxNumberIWlanLinksPerSegment` because the fixture reported `unknownAttribute`.
-The [historical acceptance report](superpowers/acceptance/reports/2026-09-24-network-phase5-pr2-qualification.md)
+The historical acceptance report
 records the qualification limits and final clean reopen; the
 [qualified contract](adr/0003-network-domain-identity-and-subnet-lifecycle.md)
 is input to later public slices. This diagnostic has no public safety token or write audit,
@@ -1393,8 +1391,7 @@ launch behavior.
 
 Earlier delivery phases used separately authorized, task-specific live acceptance procedures.
 Those legacy procedures and their source-inspection tests were removed after their durable
-evidence and limitations were recorded under `docs/superpowers/acceptance/reports/` and the
-relevant operation references. Their removal does not upgrade offline, stub, or FakeWorker results
+evidence and limitations were recorded in the relevant operation references. Their removal does not upgrade offline, stub, or FakeWorker results
 to live acceptance. Any future TIA Portal qualification requires a newly reviewed procedure,
 separate authorization, and a durable acceptance record.
 

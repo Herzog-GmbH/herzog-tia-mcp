@@ -32,25 +32,8 @@ The server guards only a write that Portal neither rejects nor reports afterward
 - Partial application is possible with no rollback; failed items carry no verification entry, so callers re-read before retrying. Collisions Portal accepts silently (for example duplicate IP or PN name) surface only in compile.
 - `engineering_rejected` does not prove a setter was reached, because the mutation flag spans the whole worker method. Collision directions beyond the live-tested ones are unverified.
 - PLC content importers and VCI still flatten Siemens failures without `engineeringError`. A new silent-ignore finding gets a targeted read-back, not a returned host guard.
-- Typed Openness calls replaced reflection in Network attachment ([E-4 acceptance](../superpowers/acceptance/reports/2026-10-25-e4-typed-network-connections-acceptance.md)).
+- Typed Openness calls replaced reflection in Network attachment (E-4 acceptance).
 - Later work built on this: [ADR-0004](0004-guarded-single-call-write-pipeline.md) (pipeline), [ADR-0011](0011-fail-closed-surface-and-portal-loss.md) (`portal_lost` precedence).
 
 ## Evidence
-- In tree: [PLC live verification](../superpowers/acceptance/reports/2026-10-26-plc-write-native-rejections-live-verification.md); [Network live verification](../superpowers/acceptance/reports/2026-10-29-network-write-native-rejections-live-verification.md); [Network Phase 4 live](../superpowers/acceptance/reports/2026-09-21-network-phase4-current-revision-live.md); [Network guarded-write offline validation](../superpowers/acceptance/reports/2026-10-03-network-json-guarded-write-offline-validation.md); [Network B-4 live](../superpowers/acceptance/reports/2026-10-19-network-b4-live-verification.md); [HMI write spike](../superpowers/acceptance/reports/2026-10-13-hmi-write-spike.md); [HMI write live acceptance](../superpowers/acceptance/reports/2026-10-14-hmi-write-live-acceptance.md); [HMI checkpoint probes](../superpowers/acceptance/reports/2026-10-29-hmi-write-checkpoint-probes.md); [HMI native-rejections live verification](../superpowers/acceptance/reports/2026-10-30-hmi-write-native-rejections-live-verification.md); [E-4 typed network connections](../superpowers/acceptance/reports/2026-10-25-e4-typed-network-connections-acceptance.md)
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-08-06-network-phase4-subnet-lifecycle-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-06-network-phase4-subnet-lifecycle.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-21-pr1-network-phase4-finish.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-26-wave1-n1-network-device-creation.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-03-network-json-guarded-write-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-03-network-json-guarded-write.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-13-hmi-write-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-13-hmi-write.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-25-e1-e2-worker-context-gates.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-25-e4-typed-network-connections.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-25-e5-shared-network-vocabulary.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-25-plc-write-native-rejections.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-26-network-write-native-rejections-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-26-network-write-native-rejections.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-29-hmi-write-native-rejections-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-29-hmi-write-native-rejections.md
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

@@ -103,7 +103,7 @@ worker-reported copied project path; verify it with a subsequent status or read 
   evidence and old cursors are invalidated; the failed request is never replayed.
   Existing typed post-mutation failures and cleanup warnings can retain their own
   categories, so inspect their outcome evidence too. The B-16/Q3 change has a
-  [verification report](../superpowers/acceptance/reports/2026-10-20-b16-q3-worker-portal-loss-live-verification.md)
+  verification report
   covering scoped Network, PLC, VCI and local-session interruption/recovery evidence.
   Candidate `e804e6f` exposed two HMI gaps: locator errors can retain
   `worker_operation_failed` after disposal and delay host invalidation; fresh HMI
@@ -140,7 +140,7 @@ binding can switch its session. Doctor's unbound-session Warning names `bind_pro
 Project-tree `cursor_binding_mismatch` means the binding ID/revision changed; start a cursor-free
 browse, including after returning to the original path.
 
-The [2026-10-03 live report](../superpowers/acceptance/reports/2026-10-03-lifecycle-tiers-bind-project-live-validation.md)
+The 2026-10-03 live report
 replaces the valid older 2026-10-01 lifecycle evidence for this candidate. All three functional
 groups passed, including read-write confirmation refusals and full policy audit provenance. The
 maintainer reported no new TIA dialog in read-only, completing the separate human observation. Offline/FakeWorker checks

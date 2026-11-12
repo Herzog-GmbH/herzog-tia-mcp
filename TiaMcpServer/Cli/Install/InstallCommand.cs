@@ -99,7 +99,7 @@ public static class InstallCommand
         var serverExePath = resolveServerExe(options.ServerPath);
         if (serverExePath is null)
         {
-            var msg = "tia-mcp executable not found. Install it with: dotnet tool install -g TiaMcpServer";
+            var msg = "tia-mcp executable not found. Pass --server-path with the full path of TiaMcpServer.exe from the herzog-tia-mcp release zip.";
             if (options.Json)
             {
                 output.WriteLine(JsonSerializer.Serialize(new

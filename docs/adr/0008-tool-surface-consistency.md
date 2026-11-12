@@ -29,15 +29,4 @@
 - Evidence limit: the items were qualified offline (builds, full suites, independent review). The only native evidence is the scoped network-object cursor smoke; no paging combination, later follow-up or merge candidate was separately re-qualified against a live Portal.
 
 ## Evidence
-- In tree: [C-5 network-object cursors live verification](../superpowers/acceptance/reports/2026-10-23-c5-network-object-cursors-live-verification.md)
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [Workstream C plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-workstream-c-plan.md)
-  - [C-1 closed tool arguments](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-c1-closed-tool-arguments.md)
-  - [C-3 failure categories](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-c3-failure-categories.md)
-  - [C-4 non-interactive guards](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-c4-noninteractive-guards.md)
-  - [C-7 read cancellation](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-c7-read-cancellation.md)
-  - [C-8 worker method lists](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-21-c8-worker-method-lists.md)
-  - [C-2 shared batch rules](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-23-c2-shared-batch-rules.md)
-  - [C-6 shared cursor plumbing](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-23-c6-shared-cursor-plumbing.md)
-  - [C-9 paging defaults and matrix](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-23-c9-paging-defaults-and-matrix.md)
-  - [Workstream C follow-ups orchestration](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-24-workstream-c-followups-orchestration.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

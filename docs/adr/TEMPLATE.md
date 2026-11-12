@@ -18,6 +18,4 @@ What was chosen, in the present tense, in 3-10 lines. Rejected alternatives, one
 - What later superseded or narrowed it, if anything.
 
 ## Evidence
-- In tree: relative links to kept live-verification reports and kept raw evidence.
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`: one absolute permalink per removed plan/spec,
-  `https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/<file>.md`
+- What was verified live: TIA Portal version, scope and result in one or two lines. Raw output and test logs stay out of the repository.

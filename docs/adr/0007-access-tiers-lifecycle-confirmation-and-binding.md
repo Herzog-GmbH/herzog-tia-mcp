@@ -29,13 +29,4 @@
 - The earlier confirm-switch and full-only lifecycle tiers were superseded within this era by the mode-derived rule above. Multiuser inspection and local sessions later extended `bind_project` without changing the model (see [ADR-0006](0006-multiuser-owner-model.md)); the removal of tokens is covered by [ADR-0004](0004-guarded-single-call-write-pipeline.md).
 
 ## Evidence
-- In tree: [annotations live report](../superpowers/acceptance/reports/2026-09-01-pr1-explicit-mcp-tool-annotations-live.md); [lifecycle offline validation](../superpowers/acceptance/reports/2026-10-01-json-contract-phase3-offline-validation.md); [lifecycle live validation](../superpowers/acceptance/reports/2026-10-01-json-contract-phase3-live-validation.md); [tiers and bind_project live validation](../superpowers/acceptance/reports/2026-10-03-lifecycle-tiers-bind-project-live-validation.md).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [PR #29 binding repair design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-08-28-pr29-binding-findings-repair-design.md)
-  - [PR #29 binding repair plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-08-28-pr29-binding-findings-repair.md)
-  - [Explicit MCP tool annotations plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-01-pr1-explicit-mcp-tool-annotations.md)
-  - [Access modes (Phase 1b) plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-30-write-safety-phase1b-access-modes.md)
-  - [Guarded lifecycle (JSON contract Phase 3) plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-30-json-contract-phase3-lifecycle.md)
-  - [Lifecycle tiers and project binding design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-01-lifecycle-tiers-and-project-binding-design.md)
-  - [Lifecycle tiers and project binding plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-02-lifecycle-tiers-and-project-binding.md)
-  - [C-0 bound-project content tools plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-22-c0-bound-project-content-tools.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

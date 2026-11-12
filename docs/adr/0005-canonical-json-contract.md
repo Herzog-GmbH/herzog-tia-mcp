@@ -27,12 +27,4 @@
 - Narrowed later: every tool is now structured and the legacy register is empty ([ADR-0008](0008-tool-surface-consistency.md)).
 
 ## Evidence
-- In tree: [Phase 2 offline validation](../superpowers/acceptance/reports/2026-09-30-json-contract-phase2-offline-validation.md); [Phase 2 live verification](../superpowers/acceptance/reports/2026-10-01-json-contract-phase2-live-verification.md).
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - [Phase 1a worker wire plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-28-json-contract-phase1a-worker-wire.md)
-  - [Phase 1b required-members design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-28-json-contract-phase1b-required-members-design.md)
-  - [Phase 1b required-members plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-28-json-contract-phase1b-required-members.md)
-  - [Phase 2 standalone tools plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-30-json-contract-phase2-standalone-tools.md)
-  - [D-1 batch read tool design](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-25-d1-batch-read-tool-design.md)
-  - [D-1 batch read tool plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-25-d1-batch-read-tool.md)
-  - [D-3/D-4/D-5 shared refactors plan](https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-25-d3-d4-d5-shared-refactors.md)
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.

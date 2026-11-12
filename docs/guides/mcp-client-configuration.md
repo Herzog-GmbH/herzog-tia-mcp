@@ -78,7 +78,7 @@ local session. Local `save_project` saves the session only and never checks in t
 Server; create, save-as, archive and close remain `unsupported_capability`. After an uncertain
 opener inspect AMC status and Portal inventory; never automatically replay. Offline read-write
 opening required operator-dismissed Siemens dialogs in the scoped
-[PR4 run](../superpowers/acceptance/reports/2026-10-08-multiuser-pr4-live-verification.md).
+PR4 run.
 Omit the path with the default binding action to select
 the sole open project or list candidates. Reattachment may require a human response to TIA's
 Openness access dialog. Worker ownership is lost on detach. Only `open_project` and `create_project`

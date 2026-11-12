@@ -21,14 +21,8 @@
 - Dependency bumps arrive as one coherent baseline.
 - Stub changes are reviewable and CI-verifiable. Touching a product `.csproj`, `Directory.Build.props`, `global.json`, `reference-stubs/` or the verification scripts also requires the Packaging test run. Live behavior must still be proven on a real Portal.
 - A raised timeout delays detection of a hung worker start, including `hello`; the docs must say so.
-- Test-runtime gain is bounded by the serial FakeWorker tail. A class that sets a `TIA_MCP_FAKE_WORKER_*` variable must not leave its serial collection. Further runtime ideas live in `IMPROVEMENT_LOG.md`.
+- Test-runtime gain is bounded by the serial FakeWorker tail. A class that sets a `TIA_MCP_FAKE_WORKER_*` variable must not leave its serial collection.
 - The migration spec's ModelContextProtocol version pin is stale; only the decision to adopt the 2.x line stands.
 
 ## Evidence
-- In tree: no kept live-verification reports; this ADR rests on offline and static evidence only.
-- Original material, removed from `main`, kept at tag `docs-archive-2026-10-30`:
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-09-12-dotnet-10-migration-design.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-12-dotnet-10-migration.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-09-28-multiuser-pr1-reference-contract-foundation.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/plans/2026-10-15-configurable-worker-timeout.md
-  - https://github.com/Czarnak/tia-portal-mcp/blob/docs-archive-2026-10-30/docs/superpowers/specs/2026-10-24-test-suite-runtime-design.md
+The plans, specs and live reports behind this decision belong to the project this repository started from and are not part of it.
