@@ -1,0 +1,8 @@
+<Project>
+  <!-- Release builds must not carry the build machine's folder (user name) in exe, dll and pdb.
+       Lives here and not in Directory.Build.props, because that file is part of the reference stubs'
+       source hash. Projects that set their own PathMap (reference-stubs) keep it. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(PathMap)' == ''">
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))=/_/</PathMap>
+  </PropertyGroup>
+</Project>
