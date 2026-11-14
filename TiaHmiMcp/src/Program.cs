@@ -19,7 +19,7 @@ namespace Herzog.TiaHmi
 {
     internal static class Program
     {
-        internal const string Version = "0.7.2";
+        internal const string Version = "0.8.0";
 
         private static string _opennessDir;
 

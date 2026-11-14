@@ -18,6 +18,7 @@ using Siemens.Engineering.HmiUnified.Common;
 using Siemens.Engineering.HmiUnified.HmiTags;
 using Siemens.Engineering.HmiUnified.UI;
 using Siemens.Engineering.HmiUnified.UI.Base;
+using Siemens.Engineering.HmiUnified.UI.Controls;
 using Siemens.Engineering.HmiUnified.UI.Dynamization;
 using Siemens.Engineering.HmiUnified.UI.Dynamization.Script;
 using Siemens.Engineering.HmiUnified.UI.Parts;
@@ -34,9 +35,15 @@ namespace Herzog.TiaHmi
             "objekt_aendern {objekt, eigenschaften}. objekt_loeschen {objekt}. objekt_umbenennen {objekt, neuerName}. " +
             "variable_binden {objekt, eigenschaft, variable, nurLesen}: Eigenschaft an eine HMI-Variable. " +
             "skript_binden {objekt, eigenschaft, skript, global, async, trigger, dauer, variablen}: Eigenschaft per JavaScript, trigger z. B. Tags (verlangt variablen), CustomCycle (mit dauer), T1s. " +
-            "dynamisierung_loeschen {objekt, eigenschaft}. " +
+            "dynamisierung_loeschen {objekt, eigenschaft}: auch Anbindungen von Widget- und Faceplate-Parametern (eigenschaft = Parametername). " +
+            "anbindungen_loeschen {filter (alle, fehlende = Variable gibt es im HMI nicht, sps = Variable mit SPS-Verbindung), objekte (optional, sonst ganzes Bild)}: loest Variablenanbindungen, z. B. fuer eine Simulation ohne Steuerung. " +
+            "anbindungen_auflisten {filter, objekte}: dasselbe nur lesen, allein im Aufruf. " +
+            "skript_aendern {objekt (leer = Bild), eigenschaft oder ereignis, skript (ganzer neuer Text) oder suchen und ersetzen (alle true bei mehreren Stellen)}: nur der Skripttext, Trigger und Variablen bleiben. " +
+            "objekte_verschieben {dx, dy, objekte: [Namen] oder \"alle\"}. " +
             "ereignis_setzen {objekt (leer = Bild), ereignis (klicken, druecken, loslassen, aufbau, abbau oder Openness-Name), skript, global, async}. ereignis_loeschen {objekt, ereignis}. " +
-            "parameter_setzen {objekt (Widget oder Faceplate), parameter, und entweder wert oder variable oder skript}. " +
+            "parameter_setzen {objekt (Widget oder Faceplate), parameter, und entweder wert oder variable oder skript}: wert ersetzt eine vorhandene Anbindung. " +
+            "Bei Faceplates wird variable verschaltet (Variablenschnittstelle); anbindung \"dynamisierung\" bindet stattdessen wie bei Widgets. " +
+            "Skripte mehrzeilig uebergeben, eine Anweisung je Zeile, Bloecke eingerueckt: So stehen sie in TIA, und Fehler nennen die richtige Zeile. " +
             "widget_erneuern {objekt, widgetTyp}: Widget neu anlegen, Lage und Werte bleiben, Anbindungen, wenn der Server sie vor dem Update sichern konnte. Noetig, wenn hmi_uebersetzen 'passen nicht zueinander' meldet. " +
             "bild_aendern {eigenschaften}. bild_umbenennen {neuerName}. bild_loeschen {} (nur allein im Aufruf). " +
             "eigenschaften: Openness-Namen aus hmi_unified_lesen mit alleEigenschaften, Teile mit Punkt (Font.Size), oder x, y, breite, hoehe, sichtbar, hintergrundfarbe, farbe, randfarbe, randbreite, schriftgroesse, format, ausrichtung, vertikal, text. " +
@@ -45,7 +52,8 @@ namespace Herzog.TiaHmi
         private static readonly HashSet<string> Actions = new HashSet<string>
         {
             "objekt_neu", "objekt_aendern", "objekt_loeschen", "objekt_umbenennen", "variable_binden", "skript_binden", "dynamisierung_loeschen",
-            "ereignis_setzen", "ereignis_loeschen", "parameter_setzen", "widget_erneuern", "bild_aendern", "bild_umbenennen", "bild_loeschen"
+            "ereignis_setzen", "ereignis_loeschen", "parameter_setzen", "widget_erneuern", "bild_aendern", "bild_umbenennen", "bild_loeschen",
+            "anbindungen_loeschen", "anbindungen_auflisten", "objekte_verschieben", "skript_aendern"
         };
 
         private readonly Log _log;
@@ -90,6 +98,7 @@ namespace Herzog.TiaHmi
                 ops.Add(d);
             }
             if (ops.Any(o => Text(o, "aktion") == "bild_loeschen") && ops.Count > 1) throw new ToolException("bild_loeschen muss allein im Aufruf stehen.");
+            if (ops.Any(o => Text(o, "aktion") == "anbindungen_auflisten") && ops.Count > 1) throw new ToolException("anbindungen_auflisten muss allein im Aufruf stehen, es aendert nichts.");
 
             HmiSoftware sw = device.UnifiedSoftware;
             WidgetContext.Project = ProjectPath(project);
@@ -101,6 +110,19 @@ namespace Herzog.TiaHmi
             var result = new Dictionary<string, object> { { "projekt", project.Name }, { "hmi", device.SoftwareName }, { "bild", target.Name }, { "ordner", target.Folder } };
 
             string projectPath = ProjectPath(project);
+            if (Text(ops[0], "aktion") == "anbindungen_auflisten")
+            {
+                string filter = Text(ops[0], "filter") ?? "alle";
+                if (filter != "alle" && filter != "fehlende" && filter != "sps") throw new ToolException("filter: alle, fehlende oder sps.");
+                var objekte = Member(ops[0], "objekte") as object[];
+                List<Dictionary<string, object>> rows = Bindings(target.Screen, sw, objekte == null ? null : objekte.Select(o => Convert.ToString(o, CultureInfo.InvariantCulture)), filter);
+                foreach (Dictionary<string, object> row in rows) row.Remove("$dyn");
+                result["angewendet"] = false;
+                result["anzahl"] = rows.Count;
+                result["anbindungen"] = rows;
+                result["ergebnis"] = "Nur gelesen. Loesen mit aktion anbindungen_loeschen und demselben filter.";
+                return result;
+            }
             if (ops.Count == 1 && Text(ops[0], "aktion") == "bild_loeschen")
             {
                 Dictionary<string, object> snap = UnifiedSnapshot.CaptureScreen(target);
@@ -153,6 +175,8 @@ namespace Herzog.TiaHmi
                 _log.Write("hmi_unified_aendern abgebrochen bei " + step + ": " + ex);
                 result["angewendet"] = false;
                 result["fehler"] = new List<object> { step + ": " + UnifiedProps.Innermost(ex) };
+                // Verweigert TIA den Commit, liegt die Ursache in einem frueher abgefangenen Fehler (z. B. beim Neuanlegen eines Widgets).
+                if (run.Warnings.Count > 0) result["moeglicheUrsache"] = run.Warnings;
                 result["ergebnis"] = "Nichts geaendert, TIA hat alles zurueckgenommen. Korrigieren und erneut aufrufen.";
                 return result;
             }
@@ -356,11 +380,31 @@ namespace Herzog.TiaHmi
                         Save(run, item);
                         string eig = Required(op, "eigenschaft");
                         DynamizationBase d = item.Dynamizations.Find(eig);
-                        if (d == null) throw new ToolException(item.Name + ": Eigenschaft '" + eig + "' ist nicht dynamisiert.");
-                        d.Delete();
+                        if (d != null)
+                        {
+                            d.Delete();
+                            AddUnboundCheck(run, item.Dynamizations, item.Name + "." + eig, eig);
+                        }
+                        else
+                        {
+                            // Widget- und Faceplate-Parameter: Die Anbindung haengt am Parameter, nicht am Objekt (Feldbefund 13.11.2026, Punkt 38).
+                            object p = InterfaceEntry(item, eig);
+                            if (p == null)
+                            {
+                                object iface = UnifiedProps.Member(item, "Interface");
+                                throw new ToolException(item.Name + ": Eigenschaft '" + eig + "' ist nicht dynamisiert." + (iface != null ? " Parameter: " + ParameterNames(iface) + "." : ""));
+                            }
+                            var dyns = (DynamizationBaseComposition)UnifiedProps.Member(p, "Dynamizations");
+                            if (dyns.Count == 0) throw new ToolException(item.Name + ": Parameter '" + eig + "' ist nicht angebunden.");
+                            foreach (DynamizationBase x in dyns.Cast<DynamizationBase>().ToList()) x.Delete();
+                            AddUnboundCheck(run, dyns, item.Name + "." + eig, null);
+                        }
                         run.Done.Add(item.Name + "." + eig + " Dynamisierung entfernt");
                         break;
                     }
+                case "anbindungen_loeschen": Unbind(run, op); break;
+                case "objekte_verschieben": Move(run, op); break;
+                case "skript_aendern": ScriptEdit(run, op); break;
                 case "ereignis_setzen":
                     {
                         object owner = Owner(run, op);
@@ -415,12 +459,37 @@ namespace Herzog.TiaHmi
             var punkte = Member(op, "punkte") as object[];
             if (punkte != null) SetPoints(item, punkte);
             Dictionary<string, object> props = Map(op, "eigenschaften", false);
-            if (props != null) SetProperties(run, item, props, name);
+            if (props != null)
+            {
+                // Einsprachiger Text bei einem neuen Objekt: in alle Projektsprachen, sonst steht dort "Text" (Punkt 29).
+                foreach (string key in props.Keys.ToList())
+                {
+                    var plain = props[key] as string;
+                    if (plain == null || run.Languages.Count < 2 || !(UnifiedProps.ReadValue(item, key) is MultilingualText)) continue;
+                    props[key] = run.Languages.Keys.ToDictionary(k => k, k => (object)plain);
+                    run.Warnings.Add(name + "." + key + ": Uebersetzung fehlt, alle Sprachen haben denselben Text. Uebersetzt mit {\"de-DE\": ..., \"en-GB\": ...}.");
+                }
+                SetProperties(run, item, props, name);
+            }
             run.Done.Add(name + " angelegt (" + t.Name + ")");
         }
 
         internal static void SetPoints(object item, object[] punkte)
         {
+            var line = item as HmiLine;
+            if (line != null)
+            {
+                // Linie: Anfangs- und Endpunkt (Punkt 36). Left/Top/Width/Height leitet TIA daraus ab.
+                if (punkte.Length != 2) throw new ToolException("punkte bei linie: genau zwei Punkte [[x1,y1],[x2,y2]].");
+                int[][] xy = punkte.Select(o =>
+                {
+                    var pair = o as object[];
+                    if (pair == null || pair.Length != 2) throw new ToolException("punkte: je Eintrag [x, y].");
+                    return new[] { Convert.ToInt32(pair[0], CultureInfo.InvariantCulture), Convert.ToInt32(pair[1], CultureInfo.InvariantCulture) };
+                }).ToArray();
+                UnifiedProps.SetLinePoints(line, xy[0][0], xy[0][1], xy[1][0], xy[1][1]);
+                return;
+            }
             var points = UnifiedProps.Member(item, "Points") as HmiPointComposition;
             if (points == null) throw new ToolException(item.GetType().Name + " hat keine Punkte.");
             // TIA verlangt mindestens zwei Punkte: vorhandene weiterverwenden, fehlende anlegen, ueberzaehlige zuletzt loeschen.
@@ -465,7 +534,25 @@ namespace Herzog.TiaHmi
             object p = iface.GetType().GetMethod("Find").Invoke(iface, new object[] { parameter });
             if (p == null) throw new ToolException(name + ": Parameter '" + parameter + "' gibt es nicht. Vorhanden: " + ParameterNames(iface) + ".");
             var dyns = (DynamizationBaseComposition)UnifiedProps.Member(p, "Dynamizations");
-            if (tag != null)
+            string mode = Text(op, "anbindung");
+            if (mode != null && mode != "verschaltung" && mode != "dynamisierung") throw new ToolException("anbindung: verschaltung oder dynamisierung.");
+            if (tag != null && item is HmiFaceplateContainer && mode != "dynamisierung")
+            {
+                // Variablenschnittstelle eines Faceplates: verschalten statt dynamisieren (Punkt 32).
+                CheckTag(run, tag);
+                UnifiedProps.SetTagParameter(dyns, parameter, tag);
+                run.Done.Add(name + "." + parameter + " mit " + tag + " verschaltet");
+                run.Warnings.Add(name + "." + parameter + ": Verschaltung ueber Openness ist neu (0.8.0) und noch nicht an einem echten Faceplate geprueft. Bitte in TIA ansehen. " +
+                    "Lehnt TIA ab, mit anbindung \"dynamisierung\" probieren (fuer Eigenschaften der Schnittstelle) oder in TIA verschalten.");
+                object capturedDyns = dyns;
+                string want = tag;
+                run.Checks.Add(new KeyValuePair<Func<object>, KeyValuePair<string, object>>(() =>
+                {
+                    var d = ((DynamizationBaseComposition)capturedDyns).Find(parameter) as TagParameterDynamization;
+                    return d == null ? "keine Verschaltung" : d.DynamicTagName;
+                }, new KeyValuePair<string, object>(name + "." + parameter + " Verschaltung", want)));
+            }
+            else if (tag != null)
             {
                 CheckTag(run, tag);
                 // Der Name der Dynamisierung ist der Parametername (getestet 06.11.2026).
@@ -482,11 +569,196 @@ namespace Herzog.TiaHmi
             {
                 object wert = Member(op, "wert");
                 if (wert == null) throw new ToolException(name + "." + parameter + ": wert, variable oder skript fehlt.");
+                // Ein fester Wert ersetzt die Anbindung. Bis 0.7.2 blieb sie stehen und die Kontrolle meldete trotzdem "entspricht" (Punkt 38).
+                int removed = 0;
+                foreach (DynamizationBase x in dyns.Cast<DynamizationBase>().ToList())
+                {
+                    x.Delete();
+                    removed++;
+                }
+                if (removed > 0) run.Warnings.Add(name + "." + parameter + ": Anbindung entfernt, es gilt jetzt der feste Wert.");
                 SetParameterValue(p, wert);
                 run.Done.Add(name + "." + parameter + " = " + wert);
                 object captured = p;
                 run.Checks.Add(new KeyValuePair<Func<object>, KeyValuePair<string, object>>(() => UnifiedProps.Member(captured, "Value"), new KeyValuePair<string, object>(name + "." + parameter, wert)));
+                AddUnboundCheck(run, dyns, name + "." + parameter, null);
             }
+        }
+
+        // Kontrolle nach dem Entfernen: Die Anbindung muss weg sein. property null = alle Dynamisierungen der Composition.
+        private static void AddUnboundCheck(Run run, DynamizationBaseComposition dyns, string what, string property)
+        {
+            run.Checks.Add(new KeyValuePair<Func<object>, KeyValuePair<string, object>>(() =>
+            {
+                List<DynamizationBase> left = dyns.Cast<DynamizationBase>().Where(d => property == null || d.PropertyName == property).ToList();
+                return left.Count == 0 ? "keine" : string.Join(", ", left.Select(d => d.DynamizationType.ToString()));
+            }, new KeyValuePair<string, object>(what + " Anbindung", "keine")));
+        }
+
+        // Parameter eines Widgets oder Faceplates mit diesem Namen, sonst null.
+        private static object InterfaceEntry(HmiScreenItemBase item, string name)
+        {
+            object iface = UnifiedProps.Member(item, "Interface");
+            if (iface == null) return null;
+            return iface.GetType().GetMethod("Find").Invoke(iface, new object[] { name });
+        }
+
+        // Alle Anbindungen an Variablen entfernen oder nur auflisten (Punkt 38, Simulation ohne Steuerung).
+        // filter: alle, fehlende (Variable gibt es im HMI nicht) oder sps (Variable mit SPS-Verbindung).
+        internal static List<Dictionary<string, object>> Bindings(HmiScreen screen, HmiSoftware sw, IEnumerable<string> only, string filter)
+        {
+            var rows = new List<Dictionary<string, object>>();
+            var names = only == null ? null : new HashSet<string>(only, StringComparer.OrdinalIgnoreCase);
+            foreach (HmiScreenItemBase item in screen.ScreenItems)
+            {
+                if (names != null && !names.Contains(item.Name)) continue;
+                CollectBindings(item.Name, null, item.Dynamizations, sw, filter, rows);
+                object iface = UnifiedProps.Member(item, "Interface");
+                if (iface == null) continue;
+                foreach (object p in (IEnumerable)iface)
+                {
+                    var dyns = UnifiedProps.Member(p, "Dynamizations") as DynamizationBaseComposition;
+                    if (dyns != null) CollectBindings(item.Name, Convert.ToString(UnifiedProps.Member(p, "PropertyName")), dyns, sw, filter, rows);
+                }
+            }
+            return rows;
+        }
+
+        private static void CollectBindings(string item, string parameter, DynamizationBaseComposition dyns, HmiSoftware sw, string filter, List<Dictionary<string, object>> rows)
+        {
+            foreach (DynamizationBase d in dyns)
+            {
+                string tag = null;
+                var td = d as TagDynamization;
+                var pd = d as TagParameterDynamization;
+                var rd = d as ResourceListDynamization;
+                if (td != null) tag = td.Tag;
+                else if (pd != null) tag = pd.DynamicTagName;
+                else if (rd != null) tag = rd.Tag;
+                if (string.IsNullOrEmpty(tag)) continue;
+                HmiTag t = sw.Tags.Find(tag.Split('.')[0]);
+                bool missing = t == null;
+                string connection = null;
+                if (t != null)
+                {
+                    try { connection = t.Connection; }
+                    catch (Exception) { }
+                }
+                if (filter == "fehlende" && !missing) continue;
+                if (filter == "sps" && (missing || string.IsNullOrEmpty(connection))) continue;
+                var row = new Dictionary<string, object> { { "objekt", item }, { "eigenschaft", parameter ?? d.PropertyName }, { "variable", tag }, { "art", d.DynamizationType.ToString() } };
+                if (parameter != null) row["parameter"] = true;
+                if (missing) row["fehlt"] = true;
+                if (!string.IsNullOrEmpty(connection)) row["verbindung"] = connection;
+                row["$dyn"] = d;
+                rows.Add(row);
+            }
+        }
+
+        private void Unbind(Run run, Dictionary<string, object> op)
+        {
+            string filter = Text(op, "filter") ?? "alle";
+            if (filter != "alle" && filter != "fehlende" && filter != "sps") throw new ToolException("filter: alle, fehlende oder sps.");
+            var objekte = Member(op, "objekte") as object[];
+            List<string> only = objekte == null ? null : objekte.Select(o => Convert.ToString(o, CultureInfo.InvariantCulture)).ToList();
+            if (only != null) foreach (string n in only) if (run.Screen.ScreenItems.Find(n) == null) throw new ToolException("Objekt '" + n + "' gibt es im Bild nicht.");
+            List<Dictionary<string, object>> rows = Bindings(run.Screen, run.Software, only, filter);
+            foreach (Dictionary<string, object> row in rows)
+            {
+                Save(run, run.Screen.ScreenItems.Find((string)row["objekt"]));
+                ((DynamizationBase)row["$dyn"]).Delete();
+                row.Remove("$dyn");
+                run.Done.Add(row["objekt"] + "." + row["eigenschaft"] + " von " + row["variable"] + " geloest");
+            }
+            if (rows.Count == 0) run.Warnings.Add("anbindungen_loeschen: keine Anbindung gefunden (filter " + filter + ").");
+            // Skripte mit Trigger auf Variablen bleiben: Sie sind keine direkte Anbindung.
+        }
+
+        // Viele Objekte auf einmal verschieben (Punkt 41). Linien ueber ihre Punkte X1..Y2, Polygone ueber Points.
+        private void Move(Run run, Dictionary<string, object> op)
+        {
+            int dx = Convert.ToInt32(Member(op, "dx") ?? 0, CultureInfo.InvariantCulture);
+            int dy = Convert.ToInt32(Member(op, "dy") ?? 0, CultureInfo.InvariantCulture);
+            if (dx == 0 && dy == 0) throw new ToolException("objekte_verschieben: dx oder dy fehlt.");
+            object sel = Member(op, "objekte");
+            List<HmiScreenItemBase> items;
+            if (sel is string && string.Equals((string)sel, "alle", StringComparison.OrdinalIgnoreCase)) items = run.Screen.ScreenItems.Cast<HmiScreenItemBase>().ToList();
+            else if (sel is object[]) items = ((object[])sel).Select(o => Item(run, new Dictionary<string, object> { { "objekt", Convert.ToString(o, CultureInfo.InvariantCulture) } }, "objekt")).ToList();
+            else throw new ToolException("objekte_verschieben: objekte als Liste von Namen oder \"alle\".");
+            foreach (HmiScreenItemBase item in items)
+            {
+                Save(run, item);
+                Shift(item, dx, dy);
+            }
+            run.Done.Add(items.Count + " Objekte um " + dx + "/" + dy + " verschoben");
+        }
+
+        internal static void Shift(object item, int dx, int dy)
+        {
+            var line = item as HmiLine;
+            if (line != null)
+            {
+                // Die Punkte zaehlen ab Left/Top, siehe UnifiedProps.LinePoints.
+                line.Left += dx;
+                line.Top += dy;
+                return;
+            }
+            var points = UnifiedProps.Member(item, "Points") as HmiPointComposition;
+            if (points != null)
+            {
+                foreach (HmiPoint p in points) { p.X += dx; p.Y += dy; }
+                return;
+            }
+            int[] g = UnifiedProps.Geometry(item);
+            if (g == null) return;
+            UnifiedProps.SetGeometry(item, g[0] + dx, g[1] + dy, null, null);
+        }
+
+        // Nur den Skripttext einer vorhandenen Dynamisierung oder eines Ereignisses aendern, Trigger und Variablen bleiben (Punkt 30).
+        private void ScriptEdit(Run run, Dictionary<string, object> op)
+        {
+            object owner = Owner(run, op);
+            string eig = Text(op, "eigenschaft");
+            string ev = Text(op, "ereignis");
+            if ((eig == null) == (ev == null)) throw new ToolException("skript_aendern: entweder eigenschaft (Dynamisierung) oder ereignis.");
+            IHmiScript script;
+            if (eig != null)
+            {
+                var dyns = UnifiedProps.Member(owner, "Dynamizations") as DynamizationBaseComposition;
+                script = dyns == null ? null : dyns.Find(eig) as ScriptDynamization;
+                if (script == null) throw new ToolException(NameOf(owner) + "." + eig + " hat kein Skript.");
+            }
+            else
+            {
+                script = UnifiedProps.FindEventScript(owner, ev);
+                if (script == null) throw new ToolException(NameOf(owner) + ": Ereignis '" + ev + "' gibt es nicht.");
+            }
+            string code = script.ScriptCode ?? "";
+            string neu = Text(op, "skript");
+            string suchen = Member(op, "suchen") as string;
+            if (neu == null)
+            {
+                if (string.IsNullOrEmpty(suchen)) throw new ToolException("skript_aendern: skript (ganzer neuer Text) oder suchen und ersetzen.");
+                string ersetzen = Member(op, "ersetzen") as string ?? "";
+                string flat = code.Replace("\r\n", "\n");
+                string find = suchen.Replace("\r\n", "\n");
+                int count = 0;
+                for (int i = flat.IndexOf(find, StringComparison.Ordinal); i >= 0; i = flat.IndexOf(find, i + find.Length, StringComparison.Ordinal)) count++;
+                if (count == 0) throw new ToolException(NameOf(owner) + ": '" + suchen + "' steht nicht im Skript.");
+                if (count > 1 && !(Flag(op, "alle") ?? false)) throw new ToolException(NameOf(owner) + ": '" + suchen + "' steht " + count + "-mal im Skript. Laenger fassen oder alle true.");
+                neu = flat.Replace(find, ersetzen.Replace("\r\n", "\n"));
+            }
+            string hint;
+            script.ScriptCode = UnifiedProps.ScriptText(neu, out hint);
+            var dyn = script as ScriptDynamization;
+            if (dyn != null && dyn.Trigger.Type == TriggerType.Tags)
+            {
+                var tags = dyn.Trigger.Tags as IEnumerable;
+                List<string> missing = tags == null ? new List<string>() : tags.Cast<object>().Select(o => Convert.ToString(o)).Where(t => run.Software.Tags.Find(t.Split('.')[0]) == null).ToList();
+                if (missing.Count > 0) run.Warnings.Add(NameOf(owner) + "." + eig + ": Trigger bleibt unveraendert, die Variablen " + string.Join(", ", missing) + " gibt es im HMI nicht. Das meldet TIA beim Uebersetzen.");
+            }
+            Remember(run, script, NameOf(owner) + (eig != null ? "." + eig : " Ereignis " + ev));
+            run.Done.Add(NameOf(owner) + (eig != null ? "." + eig : " Ereignis " + ev) + ": Skripttext geaendert");
         }
 
         internal static void SetParameterValue(object parameter, object wert)
@@ -539,6 +811,10 @@ namespace Herzog.TiaHmi
             var variablen = Member(op, "variablen") as object[];
             string refused = UnifiedProps.ScriptTriggerProblem(Required(op, "skript"), Text(op, "trigger"), variablen);
             if (refused != null) throw new ToolException(property + ": " + refused);
+            if (Text(op, "dauer") != null && !string.Equals(Text(op, "trigger"), "CustomCycle", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ToolException(property + ": dauer gilt nur mit trigger CustomCycle.");
+            }
             return UnifiedProps.SetScriptDynamization(dyns, property, Required(op, "skript"), Text(op, "global"), Flag(op, "async"), Text(op, "trigger"), Text(op, "dauer"),
                 variablen == null ? null : variablen.Select(o => Convert.ToString(o, CultureInfo.InvariantCulture)));
         }
@@ -547,6 +823,9 @@ namespace Herzog.TiaHmi
         {
             run.Scripts.Add(script);
             run.ScriptNames.Add(where);
+            string hint;
+            UnifiedProps.ScriptText(script.ScriptCode, out hint);
+            if (hint != null) run.Warnings.Add(where + ": " + hint);
         }
 
         // Syntaxfehler sollen nicht im Projekt landen: Die Transaktion wird dann zurueckgenommen.
@@ -601,6 +880,20 @@ namespace Herzog.TiaHmi
                     var s = (HmiScreen)target;
                     if (w.HasValue) s.Width = (uint)w.Value;
                     if (h.HasValue) s.Height = (uint)h.Value;
+                }
+                else if (target is HmiLine)
+                {
+                    // Linien (Punkt 36): x/y ist die linke obere Ecke der Punkte in Bildkoordinaten, verschoben wird ueber Left/Top.
+                    var line = (HmiLine)target;
+                    UnifiedProps.SetGeometry(line, x, y, w, h);
+                    int[] want = { x ?? int.MinValue, y ?? int.MinValue };
+                    run.Checks.Add(new KeyValuePair<Func<object>, KeyValuePair<string, object>>(() =>
+                    {
+                        int[] g = UnifiedProps.Geometry(line);
+                        bool same = (want[0] == int.MinValue || want[0] == g[0]) && (want[1] == int.MinValue || want[1] == g[1]);
+                        int[][] p = UnifiedProps.LinePoints(line);
+                        return same ? "ok" : "Punkte " + p[0][0] + "," + p[0][1] + " - " + p[1][0] + "," + p[1][1];
+                    }, new KeyValuePair<string, object>(what + " Lage (x/y = linke obere Ecke der Punkte)", "ok")));
                 }
                 else
                 {
@@ -798,6 +1091,15 @@ namespace Herzog.TiaHmi
                     }
                 default: throw new ToolException("Schritt '" + art + "' ist fuer Unified unbekannt.");
             }
+        }
+
+        internal static string DescribeStep(Dictionary<string, object> step)
+        {
+            object art, bild, name;
+            step.TryGetValue("art", out art);
+            step.TryGetValue("bild", out bild);
+            if (!step.TryGetValue("name", out name)) step.TryGetValue("alt", out name);
+            return art + (bild != null ? " im Bild " + bild : "") + (name != null ? ", " + name : "");
         }
 
         private static HmiScreen ScreenOf(HmiSoftware sw, string name)

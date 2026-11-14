@@ -195,11 +195,47 @@ namespace Herzog.TiaHmi
             return names;
         }
 
+        // Fehler, die TIA erst beim Aktualisieren oder in der Runtime zeigt (Feldbefund 10.11. Punkte 9/19, 13.11. Punkt 34).
+        // errors: TIA nimmt die Datei so nicht an. warnings: TIA nimmt sie an, aber in der Runtime geht es nicht.
+        public static void Check(string text, List<string> errors, List<string> warnings)
+        {
+            var defined = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match m in Regex.Matches(text, "<hmi:paramDef\\b[^>]*\\bname\\s*=\\s*\"([^\"]+)\"", RegexOptions.Singleline)) defined.Add(m.Groups[1].Value);
+            if (defined.Count == 0)
+            {
+                errors.Add("Kein <hmi:paramDef>: TIA lehnt so ein Widget beim Aktualisieren ab (\"Der Wert darf nicht NULL sein. Parametername: source\"). " +
+                    "Mindestens einen Parameter definieren, notfalls <hmi:paramDef name=\"Dummy\" type=\"number\" default=\"0\" />.");
+            }
+            Match self = Regex.Match(text, "<hmi:self\\b.*?</hmi:self>", RegexOptions.Singleline);
+            if (self.Success && self.Value.IndexOf("<hmi:localDef", StringComparison.Ordinal) >= 0)
+            {
+                errors.Add("<hmi:localDef> steht in <hmi:self>: TIA lehnt das beim Uebersetzen ab (\"Parameter [LocalProps...] ist ungueltig\").");
+            }
+            var unknown = new HashSet<string>(StringComparer.Ordinal);
+            bool modulo = false;
+            foreach (Match b in Regex.Matches(text, "\\{\\{(.*?)\\}\\}", RegexOptions.Singleline))
+            {
+                string expr = b.Groups[1].Value;
+                if (expr.IndexOf('%') >= 0) modulo = true;
+                foreach (Match p in Regex.Matches(expr, "ParamProps\\.([A-Za-z_][A-Za-z0-9_]*)")) if (!defined.Contains(p.Groups[1].Value)) unknown.Add(p.Groups[1].Value);
+            }
+            if (modulo) warnings.Add("% (Modulo) in einem Ausdruck: TIA nimmt es an, in der Runtime liefert der Ausdruck aber keinen Wert. Nachkommaanteil ueber atan2, siehe Skill tia-arbeitsweise.");
+            if (unknown.Count > 0) warnings.Add("Ausdruecke nennen Parameter, die nicht definiert sind: " + string.Join(", ", unknown) + ".");
+            if (Regex.IsMatch(text, "\\bmaxduration\\s*=", RegexOptions.IgnoreCase))
+            {
+                warnings.Add("maxduration: muss zum Erfassungszyklus der angebundenen Variable passen (gleich lang). Laenger startet die Animation bei jedem neuen Wert neu, die Bewegung wird stufig.");
+            }
+        }
+
         public static Dictionary<string, object> Install(Options options, string datei, string ordner)
         {
             string source = Importer.CheckFile(datei, ".svghmi", 50L * 1024 * 1024);
             string type = WidgetTypeOf(source);
             if (type == null) throw new ToolException("Die Datei ist kein dynamisches Widget: <hmi:self name=\"...\"> fehlt.");
+            var problems = new List<string>();
+            var hints = new List<string>();
+            Check(File.ReadAllText(source, Encoding.UTF8), problems, hints);
+            if (problems.Count > 0) throw new ToolException("Nicht installiert, TIA wuerde die Datei ablehnen: " + string.Join(" ", problems));
             string sub = string.IsNullOrWhiteSpace(ordner) ? "Eigene" : ordner.Trim().Replace('\\', '/').Trim('/');
             if (sub.Split('/').Any(p => p.Length == 0 || p == "." || p == ".." || p.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)) throw new ToolException("'ordner' ist kein gueltiger Unterordner.");
             if (sub.StartsWith(SiemensFolder, StringComparison.OrdinalIgnoreCase)) throw new ToolException("In den Siemens-Ordner " + SiemensFolder + " schreibt tia-hmi nicht.");
@@ -229,6 +265,7 @@ namespace Herzog.TiaHmi
                 { "datei", target }, { "widgetTyp", type }, { "parameter", ParameterNames(source) }, { "ersetzt", replaced }, { "unveraendert", same }
             };
             if (backup != null) result["sicherung"] = backup;
+            if (hints.Count > 0) result["warnungen"] = hints;
             return result;
         }
 
@@ -286,7 +323,8 @@ namespace Herzog.TiaHmi
             }
         }
 
-        public static List<object> ListInstalled(Options options)
+        // projectDir: Ordner des offenen Projekts oder null. Projekt-Widgets liegen in <Projekt>\UserFiles\SVGControls (Feldbefund 10.11.2026, Punkt 7).
+        public static List<object> ListInstalled(Options options, string projectDir = null)
         {
             string root = ControlsDir(options);
             var rows = new List<object>();
@@ -294,9 +332,37 @@ namespace Herzog.TiaHmi
             {
                 string rel = f.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar);
                 if (rel.StartsWith(SiemensFolder, StringComparison.OrdinalIgnoreCase)) continue;
-                rows.Add(new Dictionary<string, object> { { "datei", rel }, { "widgetTyp", WidgetTypeOf(f) }, { "stand", File.GetLastWriteTime(f).ToString("yyyy-MM-dd HH:mm") } });
+                rows.Add(Row("global", rel, f));
+            }
+            string projectControls = projectDir == null ? null : Path.Combine(projectDir, "UserFiles", "SVGControls");
+            if (projectControls != null && Directory.Exists(projectControls))
+            {
+                var globalTypes = new HashSet<string>(rows.Cast<Dictionary<string, object>>().Select(r => r["widgetTyp"] as string).Where(t => t != null));
+                foreach (string f in Directory.GetFiles(projectControls, "*.svghmi", SearchOption.AllDirectories))
+                {
+                    Dictionary<string, object> row = Row("projekt", f.Substring(projectControls.Length).TrimStart(Path.DirectorySeparatorChar), f);
+                    if (row["widgetTyp"] is string && globalTypes.Contains((string)row["widgetTyp"]))
+                    {
+                        row["hinweis"] = "Gleicher Typ auch global installiert: Welche Fassung TIA nimmt, ist unklar. Fuer Projekt-Widgets die Datei hier ersetzen und in TIA unter Dynamische Widgets auf Aktualisieren klicken (ohne Neustart).";
+                    }
+                    rows.Add(row);
+                }
             }
             return rows;
+        }
+
+        private static Dictionary<string, object> Row(string where, string rel, string file)
+        {
+            var row = new Dictionary<string, object> { { "ort", where }, { "datei", rel }, { "widgetTyp", WidgetTypeOf(file) }, { "stand", File.GetLastWriteTime(file).ToString("yyyy-MM-dd HH:mm") } };
+            try
+            {
+                Match v = Regex.Match(File.ReadAllText(file, Encoding.UTF8), "<hmi:self\\b[^>]*\\bversion\\s*=\\s*\"([^\"]+)\"", RegexOptions.Singleline);
+                if (v.Success) row["version"] = v.Groups[1].Value;
+            }
+            catch (Exception)
+            {
+            }
+            return row;
         }
 
         private static string Sha(string file)

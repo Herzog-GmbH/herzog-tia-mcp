@@ -104,7 +104,7 @@ namespace Herzog.TiaHmi
             return new List<object>
             {
                 Tool("hmi_geraete",
-                    "Listet die HMI-Geraete im offenen TIA-Projekt: Name, Geraet, Typ (Bestellnummer/Version) und Art (classic oder unified). " +
+                    "Listet die HMI-Geraete im offenen TIA-Projekt: Name, Geraet, Typ (Bestellnummer/Version) und Art (classic oder unified), dazu projektsprachen und bearbeitungssprache (Texte gehen nur in aktive Projektsprachen). " +
                     "Bei classic zusaetzlich Generation, Grenzen je Bild (Objekte, Variablen, Systemfunktionen; nur Basic Panels), Bildaufloesung und HMI-Verbindungen. " +
                     "classic (Basic, Comfort, Advanced): weiter mit hmi_liste und hmi_export. unified: weiter mit hmi_unified_liste und hmi_unified_lesen.",
                     Schema(new Dictionary<string, object> { { "projekt", projekt } }, new string[0])),
@@ -224,7 +224,8 @@ namespace Herzog.TiaHmi
                     "Liest ein WinCC-Unified-Bild mit allen Bildobjekten als JSON: Typ, Name, Lage (x, y), Groesse, Texte je Sprache, " +
                     "Variablenanbindung (Dynamisierung), Ereignisse (Skripte), bei dynamischen Widgets (dynamisches SVG, HmiCustomWidgetContainer) die Parameter mit Wert und Anbindung, " +
                     "und wichtige Eigenschaften (Openness-Namen); mit alleEigenschaften alle einfachen Attribute. " +
-                    "Legt das JSON im Arbeitsordner ab (export). Aendert nichts. Unified-Bilder haben in Openness V21 keinen XML-Export. " +
+                    "Bei Faceplates die schnittstelle (Eigenschaften mit Wert, Variablen mit Verschaltung), bei Linien punkte. " +
+                    "Legt das JSON im Arbeitsordner ab (export), ein Objekt je Zeile, gut fuer Grep. Aendert nichts. Unified-Bilder haben in Openness V21 keinen XML-Export. " +
                     "So zeigt man ein vorhandenes Bild, das in TIA nicht offen ist: vorschau true schreibt aus dem gelesenen Stand ein SVG (vorschauBild), mit echtem Hintergrund, echter Lage, Farben und Textausrichtung.",
                     Schema(new Dictionary<string, object>
                     {
@@ -232,6 +233,9 @@ namespace Herzog.TiaHmi
                         { "ordner", Prop("string", "Optional: Bildgruppe wie in hmi_unified_liste, falls der Name mehrfach vorkommt.") },
                         { "alleEigenschaften", Prop("boolean", "Optional: alle einfachen Attribute je Objekt (deutlich groesser). Standard: false.") },
                         { "vorschau", Prop("boolean", "Optional: zusaetzlich eine SVG-Skizze des Bildes schreiben (vorschauBild). Text, Formen, Tasten und Felder wie im Bild, Widgets und andere Objekte nur als Umriss (vorschauHinweis). Standard: false.") },
+                        { "ohneVariablen", Prop("boolean", "Optional: Variablenanbindungen, PLC-Pfade und Skripttexte weglassen (nur Anzahl). Fuer Projekte, deren Variablen der Assistent nicht sehen soll. Standard: false.") },
+                        { "filter", Prop("string", "Optional: nur Objekte, deren Name oder Typ diesen Text enthaelt.") },
+                        { "felder", new Dictionary<string, object> { { "type", "array" }, { "items", new Dictionary<string, object> { { "type", "string" } } }, { "description", "Optional: je Objekt nur diese Felder (typ und name immer), z. B. [\"x\", \"y\", \"texte\", \"eigenschaften\"]." } } },
                         { "maxZeichen", Prop("integer", "Optional: JSON nur bis zu dieser Laenge mitschicken, sonst nur Datei und Kurzfassung. Standard 100000.") },
                         { "hmi", hmiUnified },
                         { "projekt", projekt }
@@ -393,8 +397,9 @@ namespace Herzog.TiaHmi
                     }, new[] { "datei" }), false, false),
 
                 Tool("hmi_widget_liste",
-                    "Listet die selbst installierten dynamischen Widgets mit widgetTyp. Die Bibliothek von Siemens (IndustryGraphicLibrary) laesst sie aus.",
-                    Schema(new Dictionary<string, object>(), new string[0])),
+                    "Listet die selbst installierten dynamischen Widgets mit widgetTyp und version: ort global (TIA-Ordner, alle Projekte) und, wenn ein Projekt offen ist, ort projekt (<Projekt>\\UserFiles\\SVGControls). " +
+                    "Die Bibliothek von Siemens (IndustryGraphicLibrary) laesst sie aus.",
+                    Schema(new Dictionary<string, object> { { "projekt", projekt } }, new string[0])),
 
                 Tool("hmi_widget_abspielen",
                     "Spielt einen Ablauf im Bild-Editor von TIA ab: Setzt einen Widget-Parameter zeitgesteuert von von bis bis (rund 40 ms je Schreibvorgang) und schreibt danach den Anfangswert zurueck. Das Bild muss in TIA offen sein, damit man es sieht. " +
@@ -625,7 +630,7 @@ namespace Herzog.TiaHmi
                     case "hmi_undo": content = Undo(args); break;
                     case "hmi_uebersetzen": content = Uebersetzen(args); break;
                     case "hmi_widget_installieren": content = WidgetInstallieren(args); break;
-                    case "hmi_widget_liste": content = new List<object> { Text(_json.Serialize(new Dictionary<string, object> { { "widgets", Widgets.ListInstalled(_options) } })) }; break;
+                    case "hmi_widget_liste": content = WidgetListe(args); break;
                     case "hmi_widget_abspielen": content = WidgetAbspielen(args); break;
                     case "tia_bild": content = TiaBild(args); break;
                     case "tia_video": content = TiaVideo(args); break;
@@ -783,6 +788,16 @@ namespace Herzog.TiaHmi
                 rows.Add(row);
             }
             var result = new Dictionary<string, object> { { "projekt", project.Name }, { "hmi", rows } };
+            // Vorher wissen, welche Sprachen Texte nehmen (Feldbefund 13.11.2026, Punkt 37). Neue Projektsprachen gelten sofort, ohne Neustart.
+            try
+            {
+                result["projektsprachen"] = project.LanguageSettings.ActiveLanguages.Select(l => (object)l.Culture.Name).ToList();
+                result["bearbeitungssprache"] = project.LanguageSettings.EditingLanguage.Culture.Name;
+            }
+            catch (Exception ex)
+            {
+                if (ex is EngineeringSecurityException) throw;
+            }
             if (devices.Count == 0) result["hinweis"] = "Kein HMI-Geraet im Projekt.";
             return new List<object> { Text(_json.Serialize(result)) };
         }
@@ -1024,13 +1039,15 @@ namespace Herzog.TiaHmi
             {
                 int[] res = Unified.Resolution(sw);
                 if (res != null) result["aufloesung"] = res[0] + " x " + res[1];
+                try { result["projektsprachen"] = project.LanguageSettings.ActiveLanguages.Select(l => (object)l.Culture.Name).ToList(); }
+                catch (Exception ex) { if (ex is EngineeringSecurityException) throw; }
             }
             return new List<object> { Text(_json.Serialize(result)) };
         }
 
         private List<object> UnifiedLesen(Dictionary<string, object> args)
         {
-            CheckArgs(args, "name", "ordner", "alleEigenschaften", "vorschau", "maxZeichen", "hmi", "projekt");
+            CheckArgs(args, "name", "ordner", "alleEigenschaften", "vorschau", "maxZeichen", "ohneVariablen", "filter", "felder", "hmi", "projekt");
             string name = Required(args, "name");
             bool all = Bool(args, "alleEigenschaften", false);
             int maxChars = Int(args, "maxZeichen", DefaultMaxChars);
@@ -1041,7 +1058,27 @@ namespace Herzog.TiaHmi
             Dictionary<string, object> data = Unified.ReadScreen(screen, all);
             data["projekt"] = project.Name;
             data["hmi"] = device.SoftwareName;
-            string json = _json.Serialize(data);
+            // Feldbefund 13.11.2026, Punkt 31: Projekte, in denen der Assistent keine Variablen sehen soll, und gezieltes Lesen.
+            string filter = Str(args, "filter");
+            if (filter != null)
+            {
+                data["objekte"] = ((List<object>)data["objekte"]).Cast<Dictionary<string, object>>()
+                    .Where(o => ((string)o["name"]).IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0 || ((string)o["typ"]).IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .Cast<object>().ToList();
+                data["filter"] = filter;
+            }
+            var felder = args.ContainsKey("felder") ? args["felder"] as object[] : null;
+            if (felder != null)
+            {
+                var keep = new HashSet<string>(felder.Select(f => Convert.ToString(f, System.Globalization.CultureInfo.InvariantCulture)), StringComparer.OrdinalIgnoreCase) { "typ", "name" };
+                data["objekte"] = ((List<object>)data["objekte"]).Cast<Dictionary<string, object>>().Select(o => (object)Unified.KeepFields(o, keep)).ToList();
+            }
+            if (Bool(args, "ohneVariablen", false))
+            {
+                Unified.HideBindings(data);
+                data["ohneVariablen"] = "Anbindungen, PLC-Pfade und Skripttexte sind ausgeblendet.";
+            }
+            string json = Unified.JsonPerObject(_json, data);
 
             string dir = Path.Combine(_options.WorkDir, "export");
             Directory.CreateDirectory(dir);
@@ -1181,7 +1218,10 @@ namespace Herzog.TiaHmi
             result["angewendet"] = true;
             result["zurueckgenommen"] = done;
             if (warnings.Count > 0) result["warnungen"] = warnings;
-            result["ergebnis"] = "Zurueckgenommen, nicht gespeichert.";
+            List<string> missed = warnings.Where(w => w.StartsWith("NICHT zurueckgenommen", StringComparison.Ordinal)).ToList();
+            result["ergebnis"] = missed.Count == 0
+                ? "Zurueckgenommen, nicht gespeichert." + (warnings.Count > 0 ? " Hinweise in warnungen." : "")
+                : "Teilweise zurueckgenommen, nicht gespeichert: " + missed.Count + " Schritte gingen nicht (siehe warnungen). Diese von Hand oder mit hmi_unified_aendern nachziehen.";
             return new List<object> { Text(_json.Serialize(result)) };
         }
 
@@ -1242,11 +1282,42 @@ namespace Herzog.TiaHmi
             List<Dictionary<string, object>> rest = steps.Where(s => (string)s["art"] != "bild_zurueck" && (string)s["art"] != "bild_loeschen" && (string)s["art"] != "tabelle_loeschen").ToList();
             if (rest.Count > 0)
             {
-                using (ExclusiveAccess access = _tia.Portal.ExclusiveAccess("tia-hmi nimmt eine Aenderung zurueck"))
-                using (Transaction tx = access.Transaction(project, "tia-hmi: Rueckgaengig " + entry.Id))
+                int before = ctx.Warnings.Count;
+                try
                 {
-                    foreach (Dictionary<string, object> step in rest) UnifiedEditor.Revert(device.UnifiedSoftware, step, ctx);
-                    tx.CommitOnDispose();
+                    using (ExclusiveAccess access = _tia.Portal.ExclusiveAccess("tia-hmi nimmt eine Aenderung zurueck"))
+                    using (Transaction tx = access.Transaction(project, "tia-hmi: Rueckgaengig " + entry.Id))
+                    {
+                        foreach (Dictionary<string, object> step in rest) UnifiedEditor.Revert(device.UnifiedSoftware, step, ctx);
+                        tx.CommitOnDispose();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (ex is EngineeringSecurityException) throw;
+                    // Befund Feldbefund 13.11.2026 (Punkt 39): Ein abgefangener Fehler beim Wiederherstellen (z. B. eine Anbindung an eine
+                    // Variable, die es nicht mehr gibt) verbietet TIA den Commit. TIA hat dann alles in der Transaktion verworfen.
+                    // Darum noch einmal Schritt fuer Schritt ohne Transaktion: Jeder Openness-Aufruf gilt dann fuer sich.
+                    List<string> causes = ctx.Warnings.Skip(before).ToList();
+                    ctx.Warnings.RemoveRange(before, ctx.Warnings.Count - before);
+                    warnings.Add("In einer Transaktion lehnte TIA das Zuruecknehmen ab (" + UnifiedProps.Innermost(ex) + ")" +
+                        (causes.Count > 0 ? ", Ursache: " + string.Join(" | ", causes.Take(5)) + (causes.Count > 5 ? " | ..." : "") : "") +
+                        ". Deshalb Schritt fuer Schritt ohne Transaktion zurueckgenommen.");
+                    using (ExclusiveAccess access = _tia.Portal.ExclusiveAccess("tia-hmi nimmt eine Aenderung zurueck"))
+                    {
+                        foreach (Dictionary<string, object> step in rest)
+                        {
+                            try
+                            {
+                                UnifiedEditor.Revert(device.UnifiedSoftware, step, ctx);
+                            }
+                            catch (Exception stepEx)
+                            {
+                                if (stepEx is EngineeringSecurityException) throw;
+                                warnings.Add("NICHT zurueckgenommen: " + UnifiedEditor.DescribeStep(step) + ": " + UnifiedProps.Innermost(stepEx));
+                            }
+                        }
+                    }
                 }
             }
             // Mitangelegte Tabellen erst nach der Transaktion: Dann sind ihre Variablen sicher weg, und nur eine leere Tabelle faellt weg.
@@ -1342,6 +1413,25 @@ namespace Herzog.TiaHmi
                 }
                 if (!leaf) CollectMessages(m.Messages, where, rows, max);
             }
+        }
+
+        private List<object> WidgetListe(Dictionary<string, object> args)
+        {
+            CheckArgs(args, "projekt");
+            string projectDir = null;
+            try
+            {
+                Project project = _tia.GetProject(Str(args, "projekt"));
+                if (project.Path != null) projectDir = project.Path.DirectoryName;
+            }
+            catch (Exception ex)
+            {
+                if (ex is EngineeringSecurityException) throw;
+                // Ohne offenes Projekt nur die globalen Widgets.
+            }
+            var result = new Dictionary<string, object> { { "widgets", Widgets.ListInstalled(_options, projectDir) } };
+            if (projectDir == null) result["hinweis"] = "Kein Projekt offen: nur die global installierten Widgets.";
+            return new List<object> { Text(_json.Serialize(result)) };
         }
 
         private List<object> WidgetInstallieren(Dictionary<string, object> args)

@@ -46,6 +46,15 @@ namespace Herzog.TiaHmi
             string opacity = Get(props, "Visible") is bool && !(bool)Get(props, "Visible") ? " opacity=\"0.35\"" : "";
 
             // Linien und Polygone haben keine Lage und Groesse, sondern Punkte.
+            // Linien: punkte sind schon Bildkoordinaten (X1..Y2 zaehlen ab Left/Top).
+            List<List<double?>> linePoints = type == "HmiLine" ? Items(Get(item, "punkte")).Select(p => Items(p).Select(v => Number(v)).ToList()).Where(p => p.Count == 2).ToList() : null;
+            if (linePoints != null && linePoints.Count == 2)
+            {
+                sb.AppendFormat(CultureInfo.InvariantCulture, "<line x1=\"{0}\" y1=\"{1}\" x2=\"{2}\" y2=\"{3}\"{4} stroke-width=\"{5}\"{6}/>\n",
+                    linePoints[0][0] ?? 0, linePoints[0][1] ?? 0, linePoints[1][0] ?? 0, linePoints[1][1] ?? 0,
+                    Paint("stroke", Get(props, "LineColor") as string ?? "#000000"), Number(Get(props, "LineWidth")) ?? 1, opacity);
+                return;
+            }
             if (type == "HmiLine" && Number(Get(props, "X1")).HasValue)
             {
                 sb.AppendFormat(CultureInfo.InvariantCulture, "<line x1=\"{0}\" y1=\"{1}\" x2=\"{2}\" y2=\"{3}\"{4} stroke-width=\"{5}\"{6}/>\n",

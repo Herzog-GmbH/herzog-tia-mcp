@@ -837,6 +837,7 @@ namespace Herzog.TiaHmi
             foreach (Language l in project.LanguageSettings.ActiveLanguages) ev.Languages[l.Culture.Name] = l;
             if (!ev.Languages.ContainsKey(ev.EditingCulture)) ev.Languages[ev.EditingCulture] = project.LanguageSettings.EditingLanguage;
             fp.Add("sprachen|" + string.Join(",", ev.Languages.Keys.OrderBy(k => k, StringComparer.Ordinal)) + "|" + ev.EditingCulture);
+            var untranslated = new List<string>();
             foreach (UnifiedPlanItem it in plan.Items)
             {
                 string plain;
@@ -844,6 +845,11 @@ namespace Herzog.TiaHmi
                 {
                     it.Texts.Remove("");
                     it.Texts[ev.EditingCulture] = plain;
+                    // Ohne Angabe setzt TIA in den anderen Projektsprachen den Platzhalter "Text" (Feldbefund 13.11.2026, Punkt 29).
+                    // Darum denselben Text dort eintragen und auf die fehlende Uebersetzung hinweisen.
+                    List<string> others = ev.Languages.Keys.Where(k => !string.Equals(k, ev.EditingCulture, StringComparison.OrdinalIgnoreCase)).ToList();
+                    foreach (string other in others) it.Texts[other] = plain;
+                    if (others.Count > 0) untranslated.Add(it.Name);
                 }
                 foreach (string culture in it.Texts.Keys.ToList())
                 {
@@ -852,6 +858,12 @@ namespace Herzog.TiaHmi
                         ev.Errors.Add(it.Name + ": Sprache '" + culture + "' ist keine aktive Projektsprache. Vorhanden: " + string.Join(", ", ev.Languages.Keys) + ".");
                     }
                 }
+            }
+            if (untranslated.Count > 0)
+            {
+                ev.Warnings.Add("Uebersetzung fehlt: " + untranslated.Count + " Objekte mit text haben in " +
+                    string.Join(", ", ev.Languages.Keys.Where(k => !string.Equals(k, ev.EditingCulture, StringComparison.OrdinalIgnoreCase))) +
+                    " denselben Text wie in " + ev.EditingCulture + " (" + string.Join(", ", untranslated.Take(10)) + (untranslated.Count > 10 ? ", ..." : "") + "). Uebersetzt mit texte {\"de-DE\": ..., \"en-GB\": ...}.");
             }
 
             // Bild: Name frei, Ordner vorhanden, Nummer frei.
@@ -935,10 +947,15 @@ namespace Herzog.TiaHmi
             fp.Add("aufloesung|" + (res == null ? "?" : res[0] + "x" + res[1]));
             if (res != null)
             {
-                if ((plan.Width.HasValue && plan.Width.Value != res[0]) || (plan.Height.HasValue && plan.Height.Value != res[1]))
+                if ((plan.Width.HasValue && plan.Width.Value > res[0]) || (plan.Height.HasValue && plan.Height.Value > res[1]))
                 {
-                    ev.Errors.Add("Bildgroesse " + (plan.Width ?? res[0]) + " x " + (plan.Height ?? res[1]) + " passt nicht zum Geraet (" + res[0] + " x " + res[1] +
+                    ev.Errors.Add("Bildgroesse " + (plan.Width ?? res[0]) + " x " + (plan.Height ?? res[1]) + " ist groesser als das Geraet (" + res[0] + " x " + res[1] +
                         ", aus " + resSource + "). breite/hoehe weglassen oder anpassen.");
+                }
+                else if ((plan.Width.HasValue && plan.Width.Value != res[0]) || (plan.Height.HasValue && plan.Height.Value != res[1]))
+                {
+                    // Kleinere Bilder sind fuer Bildfenster und Popups ueblich (Feldbefund 13.11.2026, Punkt 27).
+                    ev.Warnings.Add("Bild " + (plan.Width ?? res[0]) + " x " + (plan.Height ?? res[1]) + " ist kleiner als das Geraet (" + res[0] + " x " + res[1] + "): passt fuer ein Bildfenster oder Popup.");
                 }
                 ev.ScreenWidth = plan.Width ?? res[0];
                 ev.ScreenHeight = plan.Height ?? res[1];

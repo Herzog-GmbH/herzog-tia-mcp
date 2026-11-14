@@ -83,6 +83,14 @@ namespace Herzog.TiaHmi
                         result["undo"] = _journal.Add(path, "hmi_unified_textliste", "Textliste " + name + (exists ? " geaendert" : " angelegt"), device.SoftwareName, new List<Dictionary<string, object>> { step });
                         result["angewendet"] = true;
                         result["ergebnis"] = (exists ? "Geaendert" : "Angelegt") + ", nicht gespeichert. Anbinden: symbolfeld mit eigenschaften ResourceList oder Dynamisierung. Rueckgaengig mit hmi_undo.";
+                        if (!exists)
+                        {
+                            // Wurde eine Liste in TIA umbenannt, legte schreiben mit dem alten Namen still eine zweite an (Feldbefund 13.11.2026, Punkt 40).
+                            List<string> similar = Similar(sw, name, entries.Length);
+                            result["neuAngelegt"] = true;
+                            result["hinweis"] = "Textliste '" + name + "' gab es nicht, sie wurde NEU angelegt." +
+                                (similar.Count > 0 ? " Aehnlich und vielleicht gemeint (umbenannt?): " + string.Join(", ", similar) + ". Dann mit hmi_undo zuruecknehmen und den richtigen Namen nehmen." : "");
+                        }
                         return result;
                     }
                 case "loeschen":
@@ -98,6 +106,33 @@ namespace Herzog.TiaHmi
                     }
                 default: throw new ToolException("aktion '" + aktion + "' gibt es nicht. Erlaubt: liste, lesen, schreiben, loeschen.");
             }
+        }
+
+        // Andere Listen mit aehnlichem Namen oder gleich vielen Eintraegen.
+        private static List<string> Similar(HmiSoftware sw, string name, int entryCount)
+        {
+            var result = new List<string>();
+            string a = name.ToLowerInvariant();
+            foreach (HmiTextList t in sw.HmiTextLists)
+            {
+                if (string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+                string b = t.Name.ToLowerInvariant();
+                int prefix = 0;
+                while (prefix < a.Length && prefix < b.Length && a[prefix] == b[prefix]) prefix++;
+                bool nameLike = a.Contains(b) || b.Contains(a) || prefix >= Math.Min(5, Math.Min(a.Length, b.Length));
+                int count = -1;
+                try
+                {
+                    object entries = UnifiedProps.Member(t, "Entries");
+                    if (entries is System.Collections.ICollection) count = ((System.Collections.ICollection)entries).Count;
+                    else if (entries != null) count = Convert.ToInt32(UnifiedProps.Member(entries, "Count"), CultureInfo.InvariantCulture);
+                }
+                catch (Exception)
+                {
+                }
+                if (nameLike || (count == entryCount && entryCount >= 3)) result.Add(t.Name + (count >= 0 ? " (" + count + " Eintraege)" : ""));
+            }
+            return result.Take(5).ToList();
         }
 
         private string BackupTextLists(HmiSoftware sw)

@@ -801,6 +801,55 @@ Check ((Call 'CrashGuard' 'TextSaysGone' @('Access to a disposed object ... TIA 
 Check ((Call 'CrashGuard' 'TextSaysGone' @('Variable gibt es nicht')) -eq $false) 'Normale Fehlermeldung: kein Absturz'
 Check ((Call 'UnifiedProps' 'CrashesTia' @($null, 'GmpRelevant')) -and (Call 'UnifiedProps' 'CrashesTia' @($null, 'confirmationtype')) -and (Call 'UnifiedProps' 'CrashesTia' @($null, 'MandatoryCommenting')) -and -not (Call 'UnifiedProps' 'CrashesTia' @($null, 'InitialMinValue'))) 'Gesperrte Attribute: ConfirmationType, GmpRelevant, MandatoryCommenting'
 
+# ---------- 18. Befunde aus dem Feld, Liste vom 13.11.2026 (ab 0.8.0) ----------
+Write-Output ''
+Write-Output '--- 18. Feldbefunde 13.11.2026: Widgets, Skripte, Faceplate-Texte, Lesen ---'
+function WidgetCheck([string]$text) {
+    $e = NewList; $w = NewList
+    [void](Call 'Widgets' 'Check' @($text, $e, $w))
+    return @{ E = $e; W = $w }
+}
+$svgOk = '<svg><hmi:self name="extended.Test" version="1.0.0"><hmi:paramDef name="Wert" type="number" default="0" /></hmi:self><g hmi-bind:transform="{{ ParamProps.Wert * 2 }}" /></svg>'
+$r = WidgetCheck $svgOk
+Check ($r.E.Count -eq 0 -and $r.W.Count -eq 0) 'P34: Widget mit Parameter und gueltigem Ausdruck: keine Meldung'
+$r = WidgetCheck '<svg><hmi:self name="extended.Leer" version="1.0.0"></hmi:self></svg>'
+Check ((Has $r.E '*Kein <hmi:paramDef>*Dummy*')) 'P34: Widget ohne paramDef wird abgelehnt, Abhilfe Dummy genannt'
+$r = WidgetCheck '<svg><hmi:self name="extended.L"><hmi:paramDef name="A" type="number" default="0" /><hmi:localDef name="B" type="number" /></hmi:self></svg>'
+Check (Has $r.E '*localDef*') 'P9/19: localDef in hmi:self wird abgelehnt'
+$r = WidgetCheck '<svg><hmi:self name="extended.M"><hmi:paramDef name="A" type="number" default="0" /></hmi:self><g hmi-bind:x="{{ ParamProps.A % 10 }}" hmi-bind:y="{{ ParamProps.Fehlt }}" /></svg>'
+Check ((Has $r.W '*Modulo*') -and (Has $r.W '*nicht definiert sind: Fehlt*') -and $r.E.Count -eq 0) 'P9/19: % und undefinierter Parameter als Warnung'
+
+$a = [object[]]@("let a = 1;`nif (a) {`n    a = 2;`n}", $null)
+$code = (T 'UnifiedProps').GetMethod('ScriptText', $BF).Invoke($null, $a)
+Check ($code -eq "`r`n    let a = 1;`r`n    if (a) {`r`n        a = 2;`r`n    }" -and $null -eq $a[1]) 'Skript: Rumpf in eigener Zeile, CR LF, eingerueckt wie in TIA'
+$a = [object[]]@($code, $null)
+Check ((T 'UnifiedProps').GetMethod('ScriptText', $BF).Invoke($null, $a) -eq $code) 'Skript: zurueckgelesener Rumpf bleibt unveraendert (kein doppeltes Einruecken)'
+Check ((Call 'UnifiedProps' 'ScriptLines' @("var x;`nvar y;")) -eq "var x;`r`nvar y;") 'Globaler Bereich: nur CR LF, keine Einrueckung'
+$a = [object[]]@("export function F(item) { let f = Screen.Items('X'); f.Visible = !f.Visible; let g = 1; g = g + 1; return g; }", $null)
+[void](T 'UnifiedProps').GetMethod('ScriptText', $BF).Invoke($null, $a)
+Check ($a[1] -like '*in einer Zeile*mehrzeilig*') 'Skript: langer Einzeiler bekommt einen Hinweis'
+$a = [object[]]@('return 1;', $null)
+[void](T 'UnifiedProps').GetMethod('ScriptText', $BF).Invoke($null, $a)
+Check ($null -eq $a[1]) 'Skript: kurzer Einzeiler ohne Hinweis'
+
+$projectText = '<?xml version="1.0" encoding="utf-16"?><ProjectText xmlns="x"><body><p>Start</p></body></ProjectText>'
+Check ((Call 'UnifiedProps' 'SameString' @('Start', $projectText)) -eq $true) 'P25/26: Faceplate-Text als ProjectText-XML gilt als gleich'
+Check ((Call 'UnifiedProps' 'SameString' @('Stop', $projectText)) -eq $false) 'P25/26: anderer Text bleibt Abweichung'
+Check ((Call 'UnifiedProps' 'SameString' @('a', 'a')) -eq $true -and (Call 'UnifiedProps' 'SameString' @('a', 'b')) -eq $false) 'Einfache Texte wie bisher'
+
+function ToList($arr) { [System.Collections.Generic.List[object]]::new([object[]]$arr) }
+$data = $json.DeserializeObject('{"name":"B","dynamisierungen":[{"eigenschaft":"Visible","art":"Script","skript":"geheim"}],"ereignisse":[{"ereignis":"Loaded","skript":"x()"}],"objekte":[{"typ":"HmiIOField","name":"E1","variablen":[{"eigenschaft":"ProcessValue","variable":"DB.Wert"}],"dynamisierungen":[{"eigenschaft":"ProcessValue","art":"Tag","variable":"DB.Wert","plcVariable":"DB.Wert"}]},{"typ":"HmiCustomWidgetContainer","name":"W","widgetParameter":[{"name":"P","wert":0,"variable":"T1","dynamisierungen":[{"art":"Tag"}]},{"name":"Q","wert":1}]}]}')
+# ReadScreen liefert List<object>, DeserializeObject object[]: umwandeln wie im Server.
+foreach ($k in 'objekte', 'dynamisierungen', 'ereignisse') { $data[$k] = [System.Collections.Generic.List[object]]::new([object[]]$data[$k]) }
+foreach ($o in $data['objekte']) { foreach ($k in 'widgetParameter', 'dynamisierungen') { if ($o.ContainsKey($k)) { $o[$k] = [System.Collections.Generic.List[object]]::new([object[]]$o[$k]) } } }
+[void](Call 'Unified' 'HideBindings' @($data))
+$text = $json.Serialize($data)
+Check ($text -notlike '*DB.Wert*' -and $text -notlike '*geheim*' -and $text -notlike '*x()*' -and $text -notlike '*"T1"*') 'P31: ohneVariablen blendet Variablen, PLC-Pfade und Skripte aus'
+Check ($text -like '*"angebunden":true*' -and $text -like '*"eigenschaft":"ProcessValue"*') 'P31: Anbindung bleibt als Hinweis, Eigenschaft bleibt sichtbar'
+$perLine = Call 'Unified' 'JsonPerObject' @($json, $data)
+$back = $json.DeserializeObject($perLine)
+Check (($perLine -split "`n").Count -ge 4 -and $back['objekte'].Count -eq 2 -and $back['name'] -eq 'B') 'P31: Exportdatei ein Objekt je Zeile und gueltiges JSON'
+
 Write-Output ''
 Write-Output ('Ergebnis: ' + $script:ok + ' OK, ' + $script:bad + ' Fehler. Dateien: ' + $out)
 if ($script:bad -gt 0) { exit 1 }

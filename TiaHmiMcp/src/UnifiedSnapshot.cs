@@ -228,10 +228,15 @@ namespace Herzog.TiaHmi
                 var row = new Dictionary<string, object> { { "eig", x.PropertyName }, { "art", x.GetType().Name } };
                 var tag = x as TagDynamization;
                 var script = x as ScriptDynamization;
+                var param = x as TagParameterDynamization;
                 if (tag != null)
                 {
                     TryRead(row, "tag", () => tag.Tag);
                     TryRead(row, "nurLesen", () => tag.ReadOnly);
+                }
+                else if (param != null)
+                {
+                    TryRead(row, "verschaltung", () => param.DynamicTagName);
                 }
                 else if (script != null)
                 {
@@ -239,7 +244,7 @@ namespace Herzog.TiaHmi
                     TryRead(row, "global", () => script.GlobalDefinitionAreaScriptCode);
                     TryRead(row, "async", () => script.Async);
                     TryRead(row, "trigger", () => script.Trigger.Type.ToString());
-                    TryRead(row, "dauer", () => script.Trigger.CustomDuration);
+                    TryRead(row, "dauer", () => script.Trigger.Type == TriggerType.CustomCycle ? script.Trigger.CustomDuration : null);
                     TryRead(row, "tags", () => script.Trigger.Tags as IEnumerable == null ? null : (object)((IEnumerable)script.Trigger.Tags).Cast<object>().Select(o => Convert.ToString(o)).ToList());
                 }
                 else
@@ -338,6 +343,8 @@ namespace Herzog.TiaHmi
             public Dictionary<string, Language> Languages;
             public string EditingCulture;
             public List<string> Warnings = new List<string>();
+            // Befund Feldbefund 13.11.2026 (Punkt 39): Ein abgefangener Openness-Fehler in einer Transaktion macht den Commit unmoeglich
+            // ("Commit of a Transaction is not allowed after an exception is thrown"). Die Warnungen nennen dann die Ursache.
         }
 
         // Objekt aus der Sicherung wiederherstellen: fehlt es, neu anlegen; sonst nur abweichende Werte schreiben.
@@ -478,6 +485,12 @@ namespace Herzog.TiaHmi
                         object ro;
                         UnifiedProps.SetTagDynamization(dyns, eig, (string)w["tag"], w.TryGetValue("nurLesen", out ro) ? (bool?)ro : null);
                     }
+                    else if (w.ContainsKey("verschaltung"))
+                    {
+                        var cur = dyns.Find(eig) as TagParameterDynamization;
+                        if (cur != null && cur.DynamicTagName == (string)w["verschaltung"]) continue;
+                        UnifiedProps.SetTagParameter(dyns, eig, (string)w["verschaltung"]);
+                    }
                     else if (w.ContainsKey("code"))
                     {
                         var cur = dyns.Find(eig) as ScriptDynamization;
@@ -485,14 +498,23 @@ namespace Herzog.TiaHmi
                         object a;
                         var tags = Get(w, "tags") as IEnumerable;
                         UnifiedProps.SetScriptDynamization(dyns, eig, (string)w["code"], Get(w, "global") as string, w.TryGetValue("async", out a) ? (bool?)a : null,
-                            Get(w, "trigger") as string, Get(w, "dauer") as string, tags == null ? null : tags.Cast<object>().Select(o => Convert.ToString(o)));
+                            Get(w, "trigger") as string, Get(w, "dauer") as string, tags == null ? null : tags.Cast<object>().Select(o => Convert.ToString(o)), true);
                     }
                 }
                 catch (Exception ex)
                 {
-                    ctx.Warnings.Add(what + "." + eig + ": " + UnifiedProps.Innermost(ex));
+                    ctx.Warnings.Add(what + "." + eig + ": Dynamisierung nicht wiederhergestellt (" + DescribeDynamization(w) + "): " + UnifiedProps.Innermost(ex));
                 }
             }
+        }
+
+        private static string DescribeDynamization(Dictionary<string, object> w)
+        {
+            if (w.ContainsKey("tag")) return "Variable " + w["tag"];
+            if (w.ContainsKey("verschaltung")) return "Verschaltung " + w["verschaltung"];
+            var tags = Get(w, "tags") as IEnumerable;
+            string list = tags == null ? "" : string.Join(", ", tags.Cast<object>().Select(o => Convert.ToString(o)));
+            return "Skript, Trigger " + (Get(w, "trigger") ?? "?") + (list.Length > 0 ? " auf " + list : "");
         }
 
         private static void RestoreEvents(object obj, IEnumerable saved, string what, Context ctx)
@@ -510,7 +532,7 @@ namespace Herzog.TiaHmi
                 try
                 {
                     object a;
-                    UnifiedProps.SetEvent(obj, (string)w["ev"], Get(w, "code") as string ?? "", Get(w, "global") as string, w.TryGetValue("async", out a) ? (bool?)a : null);
+                    UnifiedProps.SetEvent(obj, (string)w["ev"], Get(w, "code") as string ?? "", Get(w, "global") as string, w.TryGetValue("async", out a) ? (bool?)a : null, true);
                 }
                 catch (Exception ex)
                 {

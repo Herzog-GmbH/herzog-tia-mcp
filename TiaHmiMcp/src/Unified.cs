@@ -17,6 +17,7 @@ using Siemens.Engineering.HmiUnified;
 using Siemens.Engineering.HmiUnified.HmiConnections;
 using Siemens.Engineering.HmiUnified.HmiTags;
 using Siemens.Engineering.HmiUnified.UI.Base;
+using Siemens.Engineering.HmiUnified.UI.Controls;
 using Siemens.Engineering.HmiUnified.UI.Dynamization;
 using Siemens.Engineering.HmiUnified.UI.Dynamization.Script;
 using Siemens.Engineering.HmiUnified.UI.Features;
@@ -43,7 +44,8 @@ namespace Herzog.TiaHmi
         {
             "Visible", "Enabled", "TabIndex", "IOFieldType", "OutputFormat", "ForeColor", "BackColor", "BorderColor", "BorderWidth",
             "HorizontalTextAlignment", "VerticalTextAlignment", "Font", "Graphic", "Authorization",
-            "X1", "Y1", "X2", "Y2", "LineColor", "LineWidth", "BackFillPattern"   // Fuer die Vorschau: Lage von Linien, durchsichtige Formen
+            "X1", "Y1", "X2", "Y2", "LineColor", "LineWidth", "BackFillPattern",   // Fuer die Vorschau: Lage von Linien, durchsichtige Formen
+            "ResourceList"   // Textliste eines Symbolischen EA-Felds (Punkt 31)
         };
         private static readonly HashSet<string> SkipAttributes = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -275,6 +277,14 @@ namespace Herzog.TiaHmi
                 Try(row, "widgetTyp", () => (item as IEngineeringObject).GetAttribute("ContainedType"));
                 Try(row, "widgetParameter", () => WidgetParameters(widget, sw));
             }
+            var faceplate = item as HmiFaceplateContainer;
+            if (faceplate != null)
+            {
+                // Schnittstelle je Instanz: Eigenschaften mit Wert, Variablen mit Verschaltung (Feldbefund 13.11.2026, Punkt 25).
+                CrashGuard.Step(who + ", Faceplate-Schnittstelle");
+                Try(row, "faceplateTyp", () => faceplate.ContainedType);
+                Try(row, "schnittstelle", () => FaceplateInterface(faceplate, sw));
+            }
 
             CrashGuard.Step(who + ", Eigenschaften");
             row["eigenschaften"] = Attributes(item, all ? null : MainAttributes, 1);
@@ -284,6 +294,13 @@ namespace Herzog.TiaHmi
         // Polygon und Polylinie: [[x, y], ...]. null bei allen anderen Objekten.
         private static List<object> Points(HmiScreenItemBase item)
         {
+            var line = item as HmiLine;
+            if (line != null)
+            {
+                // Bildkoordinaten: X1..Y2 zaehlen ab Left/Top (UnifiedProps.LinePoints).
+                int[][] p = UnifiedProps.LinePoints(line);
+                return new List<object> { new List<object> { (long)p[0][0], (long)p[0][1] }, new List<object> { (long)p[1][0], (long)p[1][1] } };
+            }
             var points = UnifiedProps.Member(item, "Points") as HmiPointComposition;
             if (points == null) return null;
             return points.Cast<HmiPoint>().Select(p => (object)new List<object> { (long)p.X, (long)p.Y }).ToList();
@@ -302,6 +319,32 @@ namespace Herzog.TiaHmi
                 {
                     row["dynamisierungen"] = dyn;
                     object tag = dyn.Cast<Dictionary<string, object>>().Where(d => d.ContainsKey("variable")).Select(d => d["variable"]).FirstOrDefault();
+                    if (tag != null) row["variable"] = tag;
+                }
+                rows.Add(row);
+            }
+            return rows;
+        }
+
+        public static List<object> FaceplateInterface(HmiFaceplateContainer faceplate, HmiSoftware sw = null)
+        {
+            var rows = new List<object>();
+            foreach (HmiFaceplateInterface p in faceplate.Interface)
+            {
+                var row = new Dictionary<string, object> { { "name", p.PropertyName } };
+                Try(row, "wert", () =>
+                {
+                    object v = p.Value;
+                    // Texte kommen als <?xml ...><ProjectText><body><p>..</p></body></ProjectText>.
+                    var s = v as string;
+                    if (s != null && s.IndexOf('<') >= 0) return PlainText(s);
+                    return Simple(v, 1);
+                });
+                List<object> dyn = DynamizationRows(p.Dynamizations, sw);
+                if (dyn.Count > 0)
+                {
+                    row["anbindung"] = dyn;
+                    object tag = dyn.Cast<Dictionary<string, object>>().Select(d => d.ContainsKey("variable") ? d["variable"] : (d.ContainsKey("parameter") ? d["parameter"] : null)).FirstOrDefault(t => t != null);
                     if (tag != null) row["variable"] = tag;
                 }
                 rows.Add(row);
@@ -487,6 +530,79 @@ namespace Herzog.TiaHmi
             }
             if (v is IEnumerable) return null; // Listen und Compositions nicht ausgeben
             return v.ToString();
+        }
+
+        // ---------- Ausgabe von hmi_unified_lesen ----------
+
+        public static Dictionary<string, object> KeepFields(Dictionary<string, object> obj, HashSet<string> keep)
+        {
+            return obj.Where(kv => keep.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+
+        // Anbindungen, PLC-Pfade und Skripttexte entfernen, nur zaehlen.
+        public static void HideBindings(Dictionary<string, object> data)
+        {
+            HideIn(data);
+            var items = data["objekte"] as List<object>;
+            if (items == null) return;
+            foreach (Dictionary<string, object> o in items.OfType<Dictionary<string, object>>())
+            {
+                HideIn(o);
+                foreach (string list in new[] { "widgetParameter", "schnittstelle" })
+                {
+                    var rows = Get(o, list) as List<object>;
+                    if (rows == null) continue;
+                    foreach (Dictionary<string, object> p in rows.OfType<Dictionary<string, object>>())
+                    {
+                        bool bound = p.Remove("variable") | p.Remove("dynamisierungen") | p.Remove("anbindung");
+                        if (bound) p["angebunden"] = true;
+                    }
+                }
+            }
+        }
+
+        private static void HideIn(Dictionary<string, object> o)
+        {
+            o.Remove("variablen");
+            var dyn = Get(o, "dynamisierungen") as List<object>;
+            if (dyn != null)
+            {
+                o["dynamisierungen"] = dyn.OfType<Dictionary<string, object>>().Select(d => (object)new Dictionary<string, object> { { "eigenschaft", Get(d, "eigenschaft") }, { "art", Get(d, "art") } }).ToList();
+            }
+            var events = Get(o, "ereignisse") as List<object>;
+            if (events != null)
+            {
+                foreach (Dictionary<string, object> e in events.OfType<Dictionary<string, object>>())
+                {
+                    if (e.Remove("skript")) e["skript"] = "(ausgeblendet)";
+                    e.Remove("globalerBereich");
+                }
+            }
+        }
+
+        private static object Get(Dictionary<string, object> d, string key)
+        {
+            object v;
+            return d.TryGetValue(key, out v) ? v : null;
+        }
+
+        // JSON mit einem Bildobjekt je Zeile: Die Exportdatei war eine einzige lange Zeile (Punkt 31).
+        public static string JsonPerObject(System.Web.Script.Serialization.JavaScriptSerializer json, Dictionary<string, object> data)
+        {
+            var items = data.ContainsKey("objekte") ? data["objekte"] as List<object> : null;
+            if (items == null) return json.Serialize(data);
+            var head = data.Where(kv => kv.Key != "objekte").ToDictionary(kv => kv.Key, kv => kv.Value);
+            string start = json.Serialize(head);
+            var sb = new StringBuilder();
+            sb.Append(start.Substring(0, start.Length - 1));
+            sb.Append(head.Count > 0 ? ",\n\"objekte\": [\n" : "\"objekte\": [\n");
+            for (int i = 0; i < items.Count; i++)
+            {
+                sb.Append(json.Serialize(items[i]));
+                sb.Append(i < items.Count - 1 ? ",\n" : "\n");
+            }
+            sb.Append("]}\n");
+            return sb.ToString();
         }
 
         // ---------- Texte, Farben ----------

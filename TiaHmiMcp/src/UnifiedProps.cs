@@ -13,6 +13,7 @@ using Siemens.Engineering.HmiUnified.UI.Base;
 using Siemens.Engineering.HmiUnified.UI.Dynamization;
 using Siemens.Engineering.HmiUnified.UI.Dynamization.Script;
 using Siemens.Engineering.HmiUnified.UI.Features;
+using Siemens.Engineering.HmiUnified.UI.Shapes;
 using DrawingColor = System.Drawing.Color;
 
 namespace Herzog.TiaHmi
@@ -107,7 +108,14 @@ namespace Herzog.TiaHmi
             }
             catch (TargetInvocationException ex)
             {
-                throw new ToolException("TIA kann '" + name + "' (" + t.Name + (containedType != null ? ", " + containedType : "") + ") nicht anlegen: " + Innermost(ex));
+                string why = Innermost(ex);
+                // "No key exists for given contained type": TIA kennt den Typ nicht (Feldbefund 13.11.2026, Punkte 34 und 38).
+                if (containedType != null && why.IndexOf("No key exists", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    why += " TIA kennt den Typ '" + containedType + "' nicht: Schreibweise pruefen (hmi_widget_liste, <hmi:self name=\"...\">), " +
+                        "oder das Widget ist nicht (mehr) installiert bzw. wurde beim Import abgelehnt. In TIA unter Dynamische Widgets die Fehlerliste des Imports ansehen.";
+                }
+                throw new ToolException("TIA kann '" + name + "' (" + t.Name + (containedType != null ? ", " + containedType : "") + ") nicht anlegen: " + why);
             }
         }
 
@@ -174,9 +182,34 @@ namespace Herzog.TiaHmi
             return path;
         }
 
+        // Linien: X1..Y2 zaehlen ab Left/Top. Live 14.11.2026 am MTP1000 Unified: Left=200, Top=100 verschiebt die gezeichnete Linie
+        // um genau so viel, X1..Y2 bleiben gleich. Width/Height aendert TIA beim Setzen der Punkte nicht, sie sagen nichts ueber die Linie.
+        // Bildkoordinaten sind also Left+X1, Top+Y1 usw. Neu angelegte Linien haben Left=Top=0, darum fiel das zuerst nicht auf (Feldbefund 36).
+        public static int[][] LinePoints(HmiLine line)
+        {
+            return new[] { new[] { line.Left + line.X1, line.Top + line.Y1 }, new[] { line.Left + line.X2, line.Top + line.Y2 } };
+        }
+
+        public static void SetLinePoints(HmiLine line, int x1, int y1, int x2, int y2)
+        {
+            line.Left = 0;
+            line.Top = 0;
+            line.X1 = x1; line.Y1 = y1;
+            line.X2 = x2; line.Y2 = y2;
+        }
+
         // Lage und Groesse einheitlich setzen, auch bei Kreis und Ellipse.
         public static void SetGeometry(object obj, int? x, int? y, int? width, int? height)
         {
+            var line = obj as HmiLine;
+            if (line != null)
+            {
+                if (width.HasValue || height.HasValue) throw new ToolException(line.Name + ": Bei Linien breite/hoehe nicht setzen, sondern punkte [[x1,y1],[x2,y2]].");
+                int[] now = Geometry(line);
+                if (x.HasValue) line.Left += x.Value - now[0];
+                if (y.HasValue) line.Top += y.Value - now[1];
+                return;
+            }
             var box = obj as IHmiBoxFeature;
             if (box != null)
             {
@@ -203,6 +236,12 @@ namespace Herzog.TiaHmi
         // x, y, breite, hoehe. Bei Kreisen und Ellipsen aus Mittelpunkt und Radius gerechnet. null: Das Objekt hat so etwas nicht (z. B. Linie).
         public static int[] Geometry(object obj)
         {
+            var line = obj as HmiLine;
+            if (line != null)
+            {
+                int[][] p = LinePoints(line);
+                return new[] { Math.Min(p[0][0], p[1][0]), Math.Min(p[0][1], p[1][1]), Math.Abs(p[1][0] - p[0][0]), Math.Abs(p[1][1] - p[0][1]) };
+            }
             var box = obj as IHmiBoxFeature;
             if (box != null) return new[] { box.Left, box.Top, (int)box.Width, (int)box.Height };
             var eo = obj as IEngineeringObject;
@@ -403,7 +442,7 @@ namespace Herzog.TiaHmi
                 return string.Equals(word, actual.ToString(), StringComparison.OrdinalIgnoreCase);
             }
             if (actual is bool) return Equals(expected, actual);
-            if (actual is string) return string.Equals(Convert.ToString(expected, CultureInfo.InvariantCulture), (string)actual, StringComparison.Ordinal);
+            if (actual is string) return SameString(Convert.ToString(expected, CultureInfo.InvariantCulture), (string)actual);
             try
             {
                 return Math.Abs(Convert.ToDouble(expected, CultureInfo.InvariantCulture) - Convert.ToDouble(actual, CultureInfo.InvariantCulture)) < 0.001;
@@ -412,6 +451,13 @@ namespace Herzog.TiaHmi
             {
                 return string.Equals(Convert.ToString(expected, CultureInfo.InvariantCulture), Convert.ToString(actual, CultureInfo.InvariantCulture), StringComparison.Ordinal);
             }
+        }
+
+        // Faceplate-Texte liest TIA als <?xml ...><ProjectText ...><body><p>Text</p></body></ProjectText> zurueck (Punkt 25/26).
+        internal static bool SameString(string want, string now)
+        {
+            if (string.Equals(want, now, StringComparison.Ordinal)) return true;
+            return want != null && now != null && now.IndexOf('<') >= 0 && string.Equals(Unified.PlainText(want), Unified.PlainText(now).Trim(), StringComparison.Ordinal);
         }
 
         public static string Innermost(Exception ex)
@@ -432,6 +478,57 @@ namespace Herzog.TiaHmi
             if (readOnly.HasValue) d.ReadOnly = readOnly.Value;
         }
 
+        // Faceplate-Instanz: Eine Variable der Faceplate-Schnittstelle wird mit einer HMI-Variable verschaltet, nicht dynamisiert.
+        // Eine TagDynamization lehnt TIA dort ab ("Dynamization type not supported", Feldbefund 13.11.2026, Punkt 32).
+        // Openness V21 bietet dafuer TagParameterDynamization mit DynamicTagName (per Reflection gefunden, live nicht geprueft).
+        public static void SetTagParameter(DynamizationBaseComposition dyns, string property, string tag)
+        {
+            DynamizationBase old = dyns.Find(property);
+            if (old != null) old.Delete();
+            TagParameterDynamization d;
+            try
+            {
+                d = dyns.Create<TagParameterDynamization>(property);
+            }
+            catch (Exception ex)
+            {
+                throw new ToolException("Die Faceplate-Variablenschnittstelle '" + property + "' nimmt TIA ueber Openness nicht an (" + Innermost(ex) +
+                    "). Bitte in TIA verschalten: Faceplate-Instanz markieren, Eigenschaften > Schnittstelle.");
+            }
+            d.DynamicTagName = tag;
+        }
+
+        // Skripte: Zeilenumbrueche wie im Skripteditor von TIA (CR LF). Ein einzeiliges, langes Skript ist in TIA kaum lesbar,
+        // und Fehlermeldungen nennen dann immer Zeile 1 (Feldbefund 12.11.2026). Liefert den Code und ggf. einen Hinweis.
+        // Rumpf einer Funktion (Ereignis, Dynamisierung). TIA setzt "export function Name(...) {" davor und "}" dahinter (live 14.11.2026).
+        // Ein mehrzeiliger Rumpf beginnt deshalb in einer eigenen Zeile und wird um vier Leerzeichen eingerueckt, sonst haengt die erste
+        // Anweisung an der Kopfzeile. Beginnt der Text schon mit einem Zeilenumbruch (z. B. zurueckgelesen), bleibt er, wie er ist.
+        public static string ScriptText(string code, out string hint)
+        {
+            string normalized = ScriptLines(code);
+            hint = null;
+            if (normalized == null) return null;
+            if (normalized.IndexOf('\n') < 0)
+            {
+                if (normalized.Length > 100 && normalized.Count(c => c == ';') > 1)
+                {
+                    hint = "Skript steht in einer Zeile (" + normalized.Length + " Zeichen). In TIA ist es so kaum lesbar und Fehler nennen immer Zeile 1. " +
+                        "Bitte mehrzeilig uebergeben: eine Anweisung je Zeile, Bloecke eingerueckt.";
+                }
+                return normalized;
+            }
+            if (normalized.StartsWith("\r\n", StringComparison.Ordinal)) return normalized;
+            // Am Ende kein Umbruch: TIA setzt selbst einen vor die schliessende Klammer, sonst steht dort eine Leerzeile.
+            string[] lines = normalized.TrimEnd('\r', '\n').Split(new[] { "\r\n" }, StringSplitOptions.None);
+            return "\r\n" + string.Join("\r\n", lines.Select(l => l.Length == 0 ? l : "    " + l));
+        }
+
+        // Nur Zeilenumbrueche wie im Skripteditor von TIA (CR LF), z. B. fuer den globalen Definitionsbereich.
+        public static string ScriptLines(string code)
+        {
+            return code == null ? null : code.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+        }
+
         // Trigger Tags ohne Variablen laesst TIA anlegen und meldet erst danach "Keine Variable ist projektiert" (Blindtest B27). null: in Ordnung.
         // Gilt fuer neue Dynamisierungen. Das Wiederherstellen aus einer Sicherung legt wieder an, was da war, und laeuft nicht hierueber.
         internal static string ScriptTriggerProblem(string code, string trigger, object[] tags)
@@ -441,13 +538,14 @@ namespace Herzog.TiaHmi
             return any ? null : "trigger Tags braucht variablen: die Namen der HMI-Variablen, die das Skript ausloesen, z. B. \"variablen\": [\"Motor_Lauf\"].";
         }
 
-        public static ScriptDynamization SetScriptDynamization(DynamizationBaseComposition dyns, string property, string code, string global, bool? async, string triggerType, string duration, IEnumerable<string> tags)
+        public static ScriptDynamization SetScriptDynamization(DynamizationBaseComposition dyns, string property, string code, string global, bool? async, string triggerType, string duration, IEnumerable<string> tags, bool asIs = false)
         {
             DynamizationBase old = dyns.Find(property);
             if (old != null) old.Delete();
             ScriptDynamization d = dyns.Create<ScriptDynamization>(property);
-            d.ScriptCode = code;
-            if (global != null) d.GlobalDefinitionAreaScriptCode = global;
+            string ignored;
+            d.ScriptCode = asIs ? code : ScriptText(code, out ignored);   // asIs: aus einer Sicherung, unveraendert zurueck
+            if (global != null) d.GlobalDefinitionAreaScriptCode = asIs ? global : ScriptLines(global);
             if (async.HasValue) d.Async = async.Value;
             if (triggerType != null)
             {
@@ -461,7 +559,9 @@ namespace Herzog.TiaHmi
                     }
                 }
                 if (!found) throw new ToolException("Trigger '" + triggerType + "' gibt es nicht. Erlaubt: " + string.Join(", ", Enum.GetNames(typeof(TriggerType))) + ".");
-                if (duration != null) d.Trigger.CustomDuration = duration;
+                // Die Dauer gibt es nur bei CustomCycle. Bei anderen Triggern wirft TIA "Invalid property Call for the current trigger type".
+                // Die Sicherung las sie bis 0.8.0 immer mit, darum scheiterte hmi_undo an jedem Skript mit Trigger Tags (Feldbefund 39, live 13.11.2026).
+                if (!string.IsNullOrEmpty(duration) && d.Trigger.Type == TriggerType.CustomCycle) d.Trigger.CustomDuration = duration;
                 if (tags != null)
                 {
                     var names = tags.ToList();
@@ -472,7 +572,7 @@ namespace Herzog.TiaHmi
         }
 
         // Ereignis-Handler: Die Compositions sind je Objekttyp eigene Klassen, darum per Reflection.
-        public static IHmiScript SetEvent(object obj, string eventName, string code, string global, bool? async)
+        public static IHmiScript SetEvent(object obj, string eventName, string code, string global, bool? async, bool asIs = false)
         {
             object handlers = Member(obj, "EventHandlers");
             if (handlers == null) throw new ToolException(obj.GetType().Name + " hat keine Ereignisse.");
@@ -482,10 +582,21 @@ namespace Herzog.TiaHmi
             object value = EventValue(eventType, eventName);
             object h = find.Invoke(handlers, new[] { value }) ?? Invoke(create, handlers, value);
             var script = (IHmiScript)Member(h, "Script");
-            script.ScriptCode = code;
-            if (global != null) script.GlobalDefinitionAreaScriptCode = global;
+            string ignored;
+            script.ScriptCode = asIs ? code : ScriptText(code, out ignored);
+            if (global != null) script.GlobalDefinitionAreaScriptCode = asIs ? global : ScriptLines(global);
             if (async.HasValue) script.Async = async.Value;
             return script;
+        }
+
+        // Skript eines vorhandenen Ereignisses, sonst null.
+        public static IHmiScript FindEventScript(object obj, string eventName)
+        {
+            object handlers = Member(obj, "EventHandlers");
+            if (handlers == null) return null;
+            MethodInfo find = handlers.GetType().GetMethod("Find");
+            object h = find.Invoke(handlers, new[] { EventValue(find.GetParameters()[0].ParameterType, eventName) });
+            return h == null ? null : (IHmiScript)Member(h, "Script");
         }
 
         private static object Invoke(MethodInfo method, object target, params object[] args)

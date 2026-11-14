@@ -805,16 +805,33 @@ namespace Herzog.TiaHmi
             throw new ToolException("Bibliothek '" + bibliothek + "' gibt es nicht. 'projekt', ein Name aus aktion liste oder der Pfad zur .al21-Datei.");
         }
 
-        private static void CollectMasters(MasterCopyFolder folder, string path, List<KeyValuePair<string, MasterCopy>> list)
+        // broken: Ordner, die TIA nicht aufzaehlen kann, mit Grund. Der Rest wird trotzdem gelesen.
+        private static void CollectMasters(MasterCopyFolder folder, string path, List<KeyValuePair<string, MasterCopy>> list, List<object> broken)
         {
-            foreach (MasterCopy m in folder.MasterCopies) list.Add(new KeyValuePair<string, MasterCopy>(path, m));
-            foreach (MasterCopyUserFolder f in folder.Folders) CollectMasters(f, path.Length == 0 ? f.Name : path + "/" + f.Name, list);
+            try
+            {
+                foreach (MasterCopy m in folder.MasterCopies) list.Add(new KeyValuePair<string, MasterCopy>(path, m));
+                foreach (MasterCopyUserFolder f in folder.Folders) CollectMasters(f, path.Length == 0 ? f.Name : path + "/" + f.Name, list, broken);
+            }
+            catch (Exception ex)
+            {
+                if (ex is EngineeringSecurityException) throw;
+                broken.Add("Kopiervorlagen-Ordner '" + path + "': " + UnifiedProps.Innermost(ex));
+            }
         }
 
-        private static void CollectTypes(LibraryTypeFolder folder, string path, List<KeyValuePair<string, LibraryType>> list)
+        private static void CollectTypes(LibraryTypeFolder folder, string path, List<KeyValuePair<string, LibraryType>> list, List<object> broken)
         {
-            foreach (LibraryType t in folder.Types) list.Add(new KeyValuePair<string, LibraryType>(path, t));
-            foreach (LibraryTypeUserFolder f in folder.Folders) CollectTypes(f, path.Length == 0 ? f.Name : path + "/" + f.Name, list);
+            try
+            {
+                foreach (LibraryType t in folder.Types) list.Add(new KeyValuePair<string, LibraryType>(path, t));
+                foreach (LibraryTypeUserFolder f in folder.Folders) CollectTypes(f, path.Length == 0 ? f.Name : path + "/" + f.Name, list, broken);
+            }
+            catch (Exception ex)
+            {
+                if (ex is EngineeringSecurityException) throw;
+                broken.Add("Typ-Ordner '" + path + "': " + UnifiedProps.Innermost(ex));
+            }
         }
 
         public Dictionary<string, object> Library(TiaPortal portal, Project project, Dictionary<string, object> args)
@@ -829,24 +846,61 @@ namespace Herzog.TiaHmi
                 return result;
             }
             ILibrary lib = OpenLibrary(portal, project, UnifiedEditor.Text(args, "bibliothek"));
+            var broken = new List<object>();
             var masters = new List<KeyValuePair<string, MasterCopy>>();
-            CollectMasters(lib.MasterCopyFolder, "", masters);
+            CollectMasters(lib.MasterCopyFolder, "", masters, broken);
             var types = new List<KeyValuePair<string, LibraryType>>();
-            CollectTypes(lib.TypeFolder, "", types);
+            CollectTypes(lib.TypeFolder, "", types, broken);
             switch (aktion)
             {
                 case "inhalt":
                     {
-                        result["kopiervorlagen"] = masters.Select(m => (object)new Dictionary<string, object>
+                        // Ein Element, dessen Typ TIA nicht laden kann ("Could not load type 'Dummy'", Feldbefund 13.11.2026, Punkt 23),
+                        // darf den Rest nicht verhindern: ueberspringen und mit Namen melden.
+                        var masterRows = new List<object>();
+                        foreach (KeyValuePair<string, MasterCopy> m in masters)
                         {
-                            { "name", m.Value.Name }, { "ordner", m.Key },
-                            { "inhalt", m.Value.ContentDescriptions.Cast<MasterCopyContentDescription>().Select(c => c.ContentName + " (" + (c.ContentType != null ? c.ContentType.Name : "?") + ")").ToList() }
-                        }).ToList();
-                        result["typen"] = types.Select(t => (object)new Dictionary<string, object>
+                            var row = new Dictionary<string, object> { { "ordner", m.Key } };
+                            try
+                            {
+                                row["name"] = m.Value.Name;
+                                var parts = new List<object>();
+                                foreach (MasterCopyContentDescription c in m.Value.ContentDescriptions)
+                                {
+                                    string type;
+                                    try { type = c.ContentType != null ? c.ContentType.Name : "?"; }
+                                    catch (Exception) { type = "Typ nicht ladbar"; }
+                                    parts.Add(c.ContentName + " (" + type + ")");
+                                }
+                                row["inhalt"] = parts;
+                                masterRows.Add(row);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (ex is EngineeringSecurityException) throw;
+                                broken.Add("Kopiervorlage " + (row.ContainsKey("name") ? row["name"] : "?") + " in '" + m.Key + "': " + UnifiedProps.Innermost(ex));
+                            }
+                        }
+                        var typeRows = new List<object>();
+                        foreach (KeyValuePair<string, LibraryType> t in types)
                         {
-                            { "name", t.Value.Name }, { "ordner", t.Key },
-                            { "versionen", t.Value.Versions.Cast<LibraryTypeVersion>().Select(v => v.VersionNumber + " " + v.State).ToList() }
-                        }).ToList();
+                            var row = new Dictionary<string, object> { { "ordner", t.Key } };
+                            try
+                            {
+                                row["name"] = t.Value.Name;
+                                row["art"] = t.Value.GetType().Name;
+                                row["versionen"] = t.Value.Versions.Cast<LibraryTypeVersion>().Select(v => (object)(v.VersionNumber + " " + v.State)).ToList();
+                                typeRows.Add(row);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (ex is EngineeringSecurityException) throw;
+                                broken.Add("Typ " + (row.ContainsKey("name") ? row["name"] : "?") + " in '" + t.Key + "': " + UnifiedProps.Innermost(ex));
+                            }
+                        }
+                        result["kopiervorlagen"] = masterRows;
+                        result["typen"] = typeRows;
+                        if (broken.Count > 0) result["nichtLesbar"] = broken;
                         return result;
                     }
                 case "vorlage_einfuegen":
