@@ -49,6 +49,14 @@ namespace Herzog.TiaHmi
         public static Dictionary<string, object> CaptureItem(HmiScreenItemBase item)
         {
             var d = new Dictionary<string, object> { { "typ", item.GetType().Name }, { "name", item.Name } };
+            // Objekte, an denen TIA schon einmal gestorben ist (CrashGuard, Feldbefund 15.11.2026), nicht sichern: Das Lesen wuerde TIA
+            // wieder beenden, und ohne vollstaendige Sicherung gaebe es kein Zurueck. Schritt mit Objektnamen, damit ein Absturz
+            // hier diesem Objekt zugeordnet wird (CrashGuard sucht "Objekt '<name>'").
+            if (CrashGuard.IsBadObject(item.Name))
+            {
+                throw new ToolException("Objekt '" + item.Name + "': Daran ist TIA schon einmal abgestuerzt. tia-hmi sichert und aendert es nicht. Bitte in TIA von Hand bearbeiten.");
+            }
+            CrashGuard.Step("Objekt '" + item.Name + "' (" + item.GetType().Name + "), Sicherung");
             var eo = (IEngineeringObject)item;
             string contained = ContainedType(eo);
             if (contained == null && item is HmiCustomWidgetContainer) contained = WidgetType((HmiCustomWidgetContainer)item);
@@ -83,13 +91,15 @@ namespace Herzog.TiaHmi
             foreach (PropertyInfo p in eo.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 if (p.PropertyType != typeof(MultilingualText) || result.ContainsKey(p.Name)) continue;
+                if (UnifiedProps.CrashesTia(eo, p.Name)) continue;
                 try
                 {
                     object encoded = Encode(p.GetValue(eo, null), 0);
                     if (encoded != null) result[p.Name] = encoded;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    if (CrashGuard.IsTiaGone(ex, 0)) throw;
                     // Einzelne Texte sind nicht bei jedem Objekt lesbar.
                 }
             }
@@ -177,6 +187,7 @@ namespace Herzog.TiaHmi
                 catch (Exception ex)
                 {
                     CrashGuard.Failed(ex);
+                    if (CrashGuard.IsTiaGone(ex, 0)) throw;
                     continue;
                 }
                 bool writable = info.AccessMode == EngineeringAttributeAccessMode.ReadWrite || info.AccessMode == EngineeringAttributeAccessMode.Write;

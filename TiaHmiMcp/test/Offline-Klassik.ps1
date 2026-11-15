@@ -782,7 +782,7 @@ Check ($tSonst.Count -eq 1 -and $tSonst[0] -like 'hmi_export:*' -and $tSonst[0] 
 $cgDir = Join-Path $out 'absturz'
 $cgT = T 'CrashGuard'
 $cg = [Activator]::CreateInstance($cgT, (Raw @($cgDir, $json)))
-function Blocked([string]$p, $list) { $cgT.GetMethod('Blocked').Invoke($cg, (Raw @($p, $list))) }
+function Blocked([string]$p, $list, [string]$tool = 'hmi_unified_lesen') { $cgT.GetMethod('Blocked').Invoke($cg, (Raw @($p, $list, $tool))) }
 $proj = 'C:\x\Projekt.ap21'
 Check ($null -eq (Blocked $proj (NewList))) 'Ohne Eintrag: nichts gesperrt'
 $zl = NewList; $zl.Add($tLesen[0])
@@ -797,6 +797,24 @@ Check ($null -eq (Blocked $proj $zDaten)) 'Anderes Ziel: nicht gesperrt'
 $cgFile = Join-Path $cgDir 'abstuerze.json'
 [IO.File]::WriteAllText($cgFile, ([IO.File]::ReadAllText($cgFile) -replace '"version":"[^"]*"', '"version":"0.0.1"'), (Utf8NoBom))
 Check ($null -eq (Blocked $proj $zl)) 'Eintrag einer anderen tia-hmi-Version: nicht gesperrt'
+# Ab 0.8.1: HMI darf im Ziel auf einer Seite fehlen; Absturz an einem Objekt sperrt nur das Objekt.
+$zMitHmi = NewList; $zMitHmi.Add('unified-bild:HMI_RT_2/navigation')
+$zOhneHmi = NewList; $zOhneHmi.Add('unified-bild:/navigation')
+[void]$cgT.GetMethod('Record').Invoke($cg, (Raw @($proj, 'hmi_unified_aendern', $zMitHmi, 'Skriptpruefung btn1 Ereignis Down: Error when calling method SyntaxCheck')))
+Check ($null -ne (Blocked $proj $zOhneHmi 'hmi_unified_aendern')) '0.8.1: Ziel mit HMI sperrt auch den Aufruf ohne hmi'
+$zAndereHmi = NewList; $zAndereHmi.Add('unified-bild:HMI_RT_9/navigation')
+Check ($null -eq (Blocked $proj $zAndereHmi 'hmi_unified_aendern')) '0.8.1: Gleiches Bild auf anderer HMI: nicht gesperrt'
+$zObj = NewList; $zObj.Add('unified-bild:HMI_RT_2/01_newProduction')
+[void]$cgT.GetMethod('Record').Invoke($cg, (Raw @($proj, 'hmi_unified_lesen', $zObj, "Objekt 'Schaltflaeche_3' (HmiButton), Text AlternateText: Unexpected exception")))
+Check ($null -eq (Blocked $proj $zObj 'hmi_unified_lesen')) '0.8.1: Absturz an einem Objekt sperrt das Lesen des Bildes nicht'
+Check ($null -eq (Blocked $proj $zObj 'hmi_unified_aendern')) '0.8.1: ... und das Aendern des Bildes nicht'
+[void]$cgT.GetMethod('LoadBadObjects').Invoke($cg, (Raw @($proj, $zObj)))
+Check ((Call 'CrashGuard' 'IsBadObject' @('schaltflaeche_3')) -and -not (Call 'CrashGuard' 'IsBadObject' @('Schaltflaeche_2'))) '0.8.1: Nur das Objekt aus dem Schritt ist gesperrt (gross/klein egal)'
+$notes = $cgT.GetProperty('BadObjectNotes').GetValue($null, $null)
+Check ($notes.Count -eq 1 -and $notes[0] -like "Objekt 'Schaltflaeche_3'*") ('0.8.1: Hinweis fuer die Antwort: ' + ($notes -join ' | '))
+Check ((Call 'CrashGuard' 'ObjectOf' @('Bild ''x'': erstes Objekt holen')) -eq $null) '0.8.1: Schritt ohne Objekt nennt kein Objekt'
+[void]$cgT.GetMethod('Reset').Invoke($null, $null)
+Check (-not (Call 'CrashGuard' 'IsBadObject' @('Schaltflaeche_3'))) '0.8.1: Reset leert die Objektsperre'
 Check ((Call 'CrashGuard' 'TextSaysGone' @('Access to a disposed object ... TIA Portal has either been disposed or stopped running.')) -eq $true) 'Text "disposed or stopped running" erkannt'
 Check ((Call 'CrashGuard' 'TextSaysGone' @('Variable gibt es nicht')) -eq $false) 'Normale Fehlermeldung: kein Absturz'
 Check ((Call 'UnifiedProps' 'CrashesTia' @($null, 'GmpRelevant')) -and (Call 'UnifiedProps' 'CrashesTia' @($null, 'confirmationtype')) -and (Call 'UnifiedProps' 'CrashesTia' @($null, 'MandatoryCommenting')) -and -not (Call 'UnifiedProps' 'CrashesTia' @($null, 'InitialMinValue'))) 'Gesperrte Attribute: ConfirmationType, GmpRelevant, MandatoryCommenting'

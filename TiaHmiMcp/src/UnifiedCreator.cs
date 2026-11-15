@@ -243,6 +243,7 @@ namespace Herzog.TiaHmi
                             }
                             catch (Exception ex)
                             {
+                                if (CrashGuard.Caught(ex)) throw;
                                 ev.Errors.Add("Variable '" + t.Name + "': TIA lehnt plcVariable '" + t.PlcTag + "' ab: " + Innermost(ex));
                             }
                         }
@@ -263,6 +264,7 @@ namespace Herzog.TiaHmi
                             }
                             catch (Exception ex)
                             {
+                                if (CrashGuard.Caught(ex)) throw;
                                 ev.Errors.Add(it.Name + ": TIA kann kein Widget vom Typ '" + it.WidgetType + "' anlegen: " + Innermost(ex));
                             }
                         }
@@ -275,6 +277,7 @@ namespace Herzog.TiaHmi
             }
             catch (Exception ex)
             {
+                if (CrashGuard.Caught(ex)) throw;
                 ev.Warnings.Add("Probe in TIA nicht moeglich, SPS-Variablen und Widget-Typen sind ungeprueft: " + Innermost(ex));
             }
         }
@@ -380,6 +383,8 @@ namespace Herzog.TiaHmi
             catch (Exception ex)
             {
                 _log.Write(action + " abgebrochen bei " + step + ": " + ex);
+                // TIA schon weg: nichts aufraeumen (jeder Zugriff scheitert), Tools.Call meldet den Absturz und sperrt.
+                if (CrashGuard.Caught(ex)) throw;
                 string detail = ex.Message;
                 for (Exception inner = ex.InnerException; inner != null; inner = inner.InnerException) detail += " / " + inner.Message;
                 if (newScreen != null)
@@ -702,6 +707,7 @@ namespace Herzog.TiaHmi
 
         private static void ThrowOnScriptErrors(IHmiScript script, string where)
         {
+            if (UnifiedProps.SyntaxCheckKillsTia(script)) return;
             Siemens.Engineering.HmiUnified.Common.HmiValidationResult r = script.SyntaxCheck();
             if (r != null && r.Errors != null && r.Errors.Any()) throw new ToolException("Skriptfehler in " + where + ": " + string.Join(" | ", r.Errors));
         }
@@ -1695,7 +1701,8 @@ namespace Herzog.TiaHmi
                     try
                     {
                         var script = UnifiedProps.Member(h, "Script") as IHmiScript;
-                        if (script != null) HmiValidationResultAdd(list, item.Name + " Skript " + ev, script.SyntaxCheck());
+                        if (script != null && UnifiedProps.SyntaxCheckKillsTia(script)) list.Add(item.Name + " Skript " + ev + ": " + UnifiedProps.SyntaxCheckSkipped);
+                        else if (script != null) HmiValidationResultAdd(list, item.Name + " Skript " + ev, script.SyntaxCheck());
                     }
                     catch (Exception ex)
                     {

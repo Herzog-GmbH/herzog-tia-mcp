@@ -571,6 +571,20 @@ namespace Herzog.TiaHmi
             return d;
         }
 
+        // Feldbefund 15.11.2026, nachgestellt an einem MTP700 Unified Basic in TIA V21: Steht in einem Skript ein import im
+        // globalen Bereich (z. B. import * as m from "globalModule";) und hat schon ein anderes Skript im Projekt einen solchen
+        // Import, beendet SyntaxCheck() an diesem Skript TIA (NonRecoverableException). Das erste Skript besteht die Pruefung,
+        // jedes weitere toetet TIA, auch in getrennten Aufrufen. Skripte ohne Import pruefen weiter ohne Absturz.
+        // Darum solche Skripte nie mit SyntaxCheck pruefen; das Uebersetzen (hmi_uebersetzen) prueft sie.
+        public static bool SyntaxCheckKillsTia(IHmiScript script)
+        {
+            string global = script.GlobalDefinitionAreaScriptCode;
+            return !string.IsNullOrEmpty(global) && System.Text.RegularExpressions.Regex.IsMatch(global, @"\bimport\b");
+        }
+
+        public const string SyntaxCheckSkipped =
+            "Syntaxpruefung ausgelassen: Ein import im globalen Bereich laesst TIA bei der Pruefung abstuerzen. Mit hmi_uebersetzen pruefen.";
+
         // Ereignis-Handler: Die Compositions sind je Objekttyp eigene Klassen, darum per Reflection.
         public static IHmiScript SetEvent(object obj, string eventName, string code, string global, bool? async, bool asIs = false)
         {

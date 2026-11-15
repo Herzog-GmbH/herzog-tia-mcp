@@ -19,7 +19,7 @@ namespace Herzog.TiaHmi
             "meldung_anlegen {art: diskret oder analog, name, eigenschaften}. meldung_aendern {art, name, neuerName, eigenschaften}. meldung_loeschen {art, name}. " +
             "eigenschaften Variable: verbindung, plcVariable, datentyp, kommentar, anzeigename, zyklus, startwert oder Openness-Namen. Interne Variable: nur datentyp. " +
             "Bereichsgrenzen: untergrenze.ValueType / obergrenze.ValueType (None, Constant, Tag) und untergrenze.Value / obergrenze.Value (Zahl oder Name einer HMI-Variable). " +
-            "eigenschaften Meldung: ausloeser (Variable), bit, klasse, prioritaet, text, infotext, bedingung (analog), grenzwert (analog) oder Openness-Namen.";
+            "eigenschaften Meldung: ausloeser (Variable), bit, ausloesemodus (OnRisingEdge, OnFallingEdge), klasse, prioritaet, text, infotext, bedingung (analog), grenzwert (analog). Andere Eigenschaften setzt tia-hmi an Meldungen nicht.";
 
         private static readonly Dictionary<string, string> TagAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -66,6 +66,7 @@ namespace Herzog.TiaHmi
                         if (op == null) throw new ToolException("Jeder Eintrag in 'operationen' muss ein Objekt sein.");
                         string action = UnifiedEditor.Required(op, "aktion");
                         step = action + " " + UnifiedEditor.Text(op, "name");
+                        CrashGuard.Step(step);
                         done.Add(Execute(sw, op, action, undo, languages, editing));
                     }
                     tx.CommitOnDispose();
@@ -74,6 +75,7 @@ namespace Herzog.TiaHmi
             catch (Exception ex)
             {
                 if (ex is EngineeringSecurityException) throw;
+                if (CrashGuard.Caught(ex)) throw;
                 result["angewendet"] = false;
                 result["fehler"] = new List<object> { step + ": " + (ex is ToolException ? ex.Message : UnifiedProps.Innermost(ex)) };
                 result["ergebnis"] = "Nichts geaendert, TIA hat alles zurueckgenommen. Korrigieren und erneut aufrufen.";
@@ -147,7 +149,7 @@ namespace Herzog.TiaHmi
                         string art = Art(op);
                         if (FindAlarm(sw, art, name) != null) throw new ToolException("Meldung '" + name + "' gibt es schon.");
                         object alarm = art == "diskret" ? (object)sw.DiscreteAlarms.Create(name) : sw.AnalogAlarms.Create(name);
-                        Set(alarm, props, AlarmAliases, new string[0], languages, editing);
+                        SetAlarm(alarm, props, languages, editing);
                         undo.Add(Journal.Step("daten_meldung_loeschen", "meldungsart", art, "name", name));
                         return "Meldung " + name + " angelegt";
                     }
@@ -156,7 +158,7 @@ namespace Herzog.TiaHmi
                         string art = Art(op);
                         object alarm = RequireAlarm(sw, art, name);
                         undo.Add(Journal.Step("daten_meldung_zurueck", "meldungsart", art, "name", neu ?? name, "alterName", name, "sicherung", UnifiedSnapshot.CaptureObject((IEngineeringObject)alarm)));
-                        Set(alarm, props, AlarmAliases, new string[0], languages, editing);
+                        SetAlarm(alarm, props, languages, editing);
                         if (neu != null) ((IEngineeringObject)alarm).SetAttribute("Name", neu);
                         return "Meldung " + name + " geaendert";
                     }
@@ -201,6 +203,66 @@ namespace Herzog.TiaHmi
             {
                 CrashGuard.Step(context + " > " + kv.Key);
                 UnifiedProps.Set(target, kv.Key, kv.Value, languages, editing);
+            }
+        }
+
+        // Feldbefund 14.11.2026, nachgestellt 15.11.2026 an einem MTP700 Unified Basic (TIA V21): Der allgemeine Weg
+        // (UnifiedProps.Set ueber GetAttributeInfos/SetAttribute) scheitert an einer neuen Bitmeldung beim Ausloeser mit
+        // "PropertyDoesNotExists", Sekunden spaeter stirbt TIA. Dieselbe Meldung mit den typisierten Eigenschaften
+        // (RaisedStateTag, RaisedStateTagBitNumber, AlarmClass) laeuft am selben Geraet ohne Absturz. Darum nur diese, keine Openness-Namen.
+        private static void SetAlarm(object target, Dictionary<string, object> props, Dictionary<string, Language> languages, string editing)
+        {
+            if (props == null) return;
+            var alarm = (Siemens.Engineering.HmiUnified.HmiAlarm.HmiAlarmCommon.AlarmBase)target;
+            var discrete = target as HmiDiscreteAlarm;
+            var analog = target as HmiAnalogAlarm;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            string context = CrashGuard.LastStep;
+            foreach (var kv in props)
+            {
+                string key = kv.Key, alias;
+                if (AlarmAliases.TryGetValue(key, out alias)) key = alias;
+                CrashGuard.Step(context + " > " + key);
+                object v = kv.Value;
+                switch (key.ToLowerInvariant())
+                {
+                    case "raisedstatetag":
+                        alarm.RaisedStateTag = Convert.ToString(v, inv);
+                        break;
+                    case "raisedstatetagbitnumber":
+                        if (discrete == null) throw new ToolException("bit gibt es nur bei Bitmeldungen (art diskret).");
+                        discrete.RaisedStateTagBitNumber = Convert.ToUInt32(v, inv);
+                        break;
+                    case "triggermode":
+                    case "ausloesemodus":
+                        if (discrete == null) throw new ToolException("ausloesemodus gibt es nur bei Bitmeldungen (art diskret).");
+                        discrete.TriggerMode = (Siemens.Engineering.HmiUnified.HmiAlarm.HmiAlarmCommon.HmiDiscreteAlarmTriggerMode)Enum.Parse(
+                            typeof(Siemens.Engineering.HmiUnified.HmiAlarm.HmiAlarmCommon.HmiDiscreteAlarmTriggerMode), Convert.ToString(v, inv), true);
+                        break;
+                    case "alarmclass":
+                        alarm.AlarmClass = Convert.ToString(v, inv);
+                        break;
+                    case "priority":
+                        alarm.Priority = Convert.ToByte(v, inv);
+                        break;
+                    case "eventtext":
+                        UnifiedProps.SetTexts(alarm.EventText, v, languages, editing, kv.Key);
+                        break;
+                    case "infotext":
+                        UnifiedProps.SetTexts(alarm.InfoText, v, languages, editing, kv.Key);
+                        break;
+                    case "condition":
+                        if (analog == null) throw new ToolException("bedingung gibt es nur bei Analogmeldungen (art analog).");
+                        analog.Condition = (Siemens.Engineering.HmiUnified.HmiAlarm.HmiAlarmCommon.HmiAlarmCondition)Enum.Parse(
+                            typeof(Siemens.Engineering.HmiUnified.HmiAlarm.HmiAlarmCommon.HmiAlarmCondition), Convert.ToString(v, inv), true);
+                        break;
+                    case "conditionvalue":
+                        if (analog == null) throw new ToolException("grenzwert gibt es nur bei Analogmeldungen (art analog).");
+                        analog.ConditionValue = (v is int || v is long) ? (object)Convert.ToInt32(v, inv) : Convert.ToDouble(v, inv);
+                        break;
+                    default:
+                        throw new ToolException("Meldung: Eigenschaft '" + kv.Key + "' setzt tia-hmi nicht. Erlaubt: ausloeser, bit, ausloesemodus, klasse, prioritaet, text, infotext, bedingung, grenzwert.");
+                }
             }
         }
 

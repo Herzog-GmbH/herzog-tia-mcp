@@ -218,6 +218,7 @@ namespace Herzog.TiaHmi
             }
             result["anzahlObjekte"] = items.Count;
             result["objekte"] = items;
+            if (CrashGuard.BadObjectNotes.Count > 0) result["absturzHinweise"] = CrashGuard.BadObjectNotes.ToList();
             return result;
         }
 
@@ -227,11 +228,19 @@ namespace Herzog.TiaHmi
             CrashGuard.Step("Objekt vom Typ " + item.GetType().Name + ", Name");
             row["name"] = item.Name;
             string who = "Objekt '" + item.Name + "' (" + item.GetType().Name + ")";
+            // Feldbefund 15.11.2026 (Unified Basic, eine einzelne Taste in einem Bild): Openness stirbt an einzelnen Objekten, ohne dass man es
+            // vorher sieht (dort beim ersten Lesen eines Sprachtextes; der Editor zeigt die Taste problemlos). Ist TIA an diesem Objekt
+            // schon einmal gestorben (abstuerze.json, CrashGuard), nur Typ und Name melden, den Rest des Bildes normal lesen.
+            if (CrashGuard.IsBadObject(item.Name))
+            {
+                row["nichtGelesen"] = "TIA ist beim Lesen dieses Objekts schon einmal abgestuerzt (siehe absturzHinweise). tia-hmi liest und aendert es nicht; bitte in TIA von Hand ansehen.";
+                return row;
+            }
             CrashGuard.Step(who + ", Lage");
             // Lage und Groesse einheitlich, bei Kreis und Ellipse aus Mittelpunkt und Radius (bis 0.6.0 meldete das Ruecklesen hier unnoetige Abweichungen).
             int[] geometry = null;
             try { geometry = UnifiedProps.Geometry(item); }
-            catch (Exception ex) { CrashGuard.Failed(ex); }
+            catch (Exception ex) { CrashGuard.Failed(ex); if (CrashGuard.IsTiaGone(ex, 0)) throw; }
             if (geometry != null)
             {
                 row["x"] = geometry[0];
@@ -245,6 +254,7 @@ namespace Herzog.TiaHmi
             foreach (PropertyInfo p in item.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 if (p.PropertyType != typeof(MultilingualText) || p.GetIndexParameters().Length > 0) continue;
+                if (UnifiedProps.CrashesTia(item, p.Name)) continue;
                 CrashGuard.Step(who + ", Text " + p.Name);
                 try
                 {
@@ -254,6 +264,8 @@ namespace Herzog.TiaHmi
                 catch (Exception ex)
                 {
                     CrashGuard.Failed(ex);
+                    // Ist TIA weg, nicht weiterlesen: Jeder weitere Zugriff scheitert nur noch, und Tools.Call soll den Absturz melden und sperren.
+                    if (CrashGuard.IsTiaGone(ex, 0)) throw;
                     // Einzelne Eigenschaften liefern bei manchen Typen nichts; das ist kein Fehler fuers Lesen.
                 }
             }
@@ -502,6 +514,7 @@ namespace Herzog.TiaHmi
                 catch (Exception ex)
                 {
                     CrashGuard.Failed(ex);
+                    if (CrashGuard.IsTiaGone(ex, 0)) throw;
                     // Nicht lesbare Attribute weglassen.
                 }
             }
@@ -672,6 +685,7 @@ namespace Herzog.TiaHmi
             catch (Exception ex)
             {
                 CrashGuard.Failed(ex);
+                if (CrashGuard.IsTiaGone(ex, 0)) throw;
                 // Ein nicht lesbarer Wert soll die ganze Liste nicht verhindern.
             }
         }

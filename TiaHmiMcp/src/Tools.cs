@@ -577,8 +577,13 @@ namespace Herzog.TiaHmi
                 if (_crash != null && name != "hmi_undo" && name != "hmi_widget_liste")
                 {
                     crashProject = _tia.ProjectPathFor(Str(args, "projekt"));
-                    string blocked = _crash.Blocked(crashProject, crashTargets);
+                    string blocked = _crash.Blocked(crashProject, crashTargets, name);
                     if (blocked != null) throw new ToolException(blocked);
+                    if (CrashGuard.WorksAroundObjects(name))
+                    {
+                        _crash.LoadBadObjects(crashProject, crashTargets);
+                        if (name == "hmi_unified_aendern") RefuseBadObjects(args);
+                    }
                 }
                 if (_options.ReadOnly && ChangingTools.Contains(name))
                 {
@@ -661,11 +666,21 @@ namespace Herzog.TiaHmi
                 {
                     return CrashResult(name, argText, crashTargets, crashProject, null, content);
                 }
+                // TIA kann auch erst Sekunden nach dem Zuruecknehmen sterben (14.11.2026). Nur nach abgefangenem Openness-Fehler warten.
+                if (_crash != null && CrashGuard.CaughtOpennessError && CrashGuard.DiesWithin(_tia.ProcessId, CrashWaitMs))
+                {
+                    return CrashResult(name, argText, crashTargets, crashProject, null, content);
+                }
                 _log.Write(name + " " + argText + " -> ok (" + watch.ElapsedMilliseconds + " ms)");
                 return new Dictionary<string, object> { { "content", content }, { "isError", false } };
             }
             catch (ToolException ex)
             {
+                // hmi_unified_anlegen und hmi_unified_einfuegen verpacken Openness-Fehler in eine ToolException.
+                if (_crash != null && CrashGuard.CaughtOpennessError && CrashGuard.DiesWithin(_tia.ProcessId, CrashWaitMs))
+                {
+                    return CrashResult(name, argText, crashTargets, crashProject, ex, null);
+                }
                 _log.Write(name + " " + argText + " -> abgelehnt: " + ex.Message);
                 return ErrorResult(ex.Message);
             }
@@ -702,15 +717,45 @@ namespace Herzog.TiaHmi
                 ? CrashGuard.FirstFailure + " (letzter Schritt: " + CrashGuard.LastStep + ")"
                 : CrashGuard.LastStep;
             project = project ?? _tia.AttachedProjectPath;
-            _log.Write(name + " " + argText + " -> TIA abgestuerzt" + (step != null ? ", zuletzt: " + step : "") + (ex != null ? ": " + ex : ""));
+            _log.Write(name + " " + argText + " -> TIA abgestuerzt" + (step != null ? ", zuletzt: " + step : "") + (ex != null ? ": " + ex : "") +
+                (CrashGuard.CaughtException != null ? "\r\n   Abgefangen vorher: " + CrashGuard.CaughtException : ""));
             if (project != null) _crash.Record(project, name, targets, step);
             _tia.Detach();
+            string badObject = CrashGuard.WorksAroundObjects(name) ? CrashGuard.ObjectOf(step) : null;
+            string again = badObject != null
+                ? "Erneutes Lesen und Aendern des Bildes ist erlaubt, tia-hmi laesst Objekt '" + badObject + "' dann aus. Dieses Objekt nicht ueber tia-hmi aendern, Aenderungen daran von Hand in TIA. "
+                : "Diesen Aufruf NICHT wiederholen, auch nicht leicht abgewandelt: tia-hmi sperrt ihn fuer dieses Projekt. ";
             string text = "TIA Portal ist bei diesem Aufruf abgestuerzt" + (step != null ? " (zuletzt: " + step + ")" : "") + ". " + TiaClosedHint + " " +
-                "Diesen Aufruf NICHT wiederholen, auch nicht leicht abgewandelt: tia-hmi sperrt ihn fuer dieses Projekt. " +
-                "Dem Nutzer sagen, was abgestuerzt ist, und dass er es der IT meldet.";
+                again + "Dem Nutzer sagen, was abgestuerzt ist, und dass er es der IT meldet.";
             if (content != null) text += " Antwort des Werkzeugs: " + _json.Serialize(content);
             return ErrorResult(text);
         }
+
+        // An einem Objekt, an dem TIA schon gestorben ist, aendert tia-hmi nichts (CrashGuard.LoadBadObjects).
+        private static void RefuseBadObjects(Dictionary<string, object> args)
+        {
+            var ops = args.ContainsKey("operationen") ? args["operationen"] as object[] : null;
+            if (ops == null) return;
+            foreach (object o in ops)
+            {
+                var op = o as Dictionary<string, object>;
+                if (op == null) continue;
+                var names = new List<string>();
+                object v;
+                if (op.TryGetValue("objekt", out v) && v != null) names.Add(Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture));
+                if (op.TryGetValue("objekte", out v) && v is object[]) names.AddRange(((object[])v).Select(x => Convert.ToString(x, System.Globalization.CultureInfo.InvariantCulture)));
+                foreach (string n in names)
+                {
+                    if (!CrashGuard.IsBadObject(n)) continue;
+                    string note = CrashGuard.BadObjectNotes.FirstOrDefault(t => t.StartsWith("Objekt '" + n + "'", StringComparison.OrdinalIgnoreCase));
+                    throw new ToolException("Gesperrt: " + (note ?? "Objekt '" + n + "' hat TIA schon einmal abstuerzen lassen.") +
+                        " Den Aufruf ohne dieses Objekt wiederholen, es selbst in TIA von Hand aendern.");
+                }
+            }
+        }
+
+        // So lange wartet tia-hmi nach einem abgefangenen Openness-Fehler, ob TIA stirbt. Lebt TIA weiter, kostet das diese Zeit.
+        internal const int CrashWaitMs = 10000;
 
         // Nach dieser Ausnahme beendet sich TIA selbst, beobachtet 07.11.2026 beim Import eines unbekannten Datentyps.
         internal const string TiaClosedHint =
@@ -1295,6 +1340,7 @@ namespace Herzog.TiaHmi
                 catch (Exception ex)
                 {
                     if (ex is EngineeringSecurityException) throw;
+                    if (CrashGuard.Caught(ex)) throw;
                     // Befund Feldbefund 13.11.2026 (Punkt 39): Ein abgefangener Fehler beim Wiederherstellen (z. B. eine Anbindung an eine
                     // Variable, die es nicht mehr gibt) verbietet TIA den Commit. TIA hat dann alles in der Transaktion verworfen.
                     // Darum noch einmal Schritt fuer Schritt ohne Transaktion: Jeder Openness-Aufruf gilt dann fuer sich.
@@ -1314,6 +1360,7 @@ namespace Herzog.TiaHmi
                             catch (Exception stepEx)
                             {
                                 if (stepEx is EngineeringSecurityException) throw;
+                                if (CrashGuard.Caught(stepEx)) throw;
                                 warnings.Add("NICHT zurueckgenommen: " + UnifiedEditor.DescribeStep(step) + ": " + UnifiedProps.Innermost(stepEx));
                             }
                         }

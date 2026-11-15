@@ -46,6 +46,10 @@ namespace Herzog.TiaHmi
         {
             _step = null;
             _firstFailure = null;
+            _caught = false;
+            _caughtException = null;
+            _badObjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _badNotes = new List<string>();
         }
 
         public static void Failed(Exception ex)
@@ -64,6 +68,56 @@ namespace Herzog.TiaHmi
         public static string FirstFailure
         {
             get { return _firstFailure; }
+        }
+
+        // Ein Werkzeug hat einen Openness-Fehler abgefangen und als Antwort gemeldet (angewendet: false).
+        // Beobachtet 14.11. und 15.11.2026 (Feld, Unified Basic): TIA stirbt im selben Aufruf, beim Fehler selbst
+        // (NonRecoverableException in SyntaxCheck) oder Sekunden nach dem Zuruecknehmen der Transaktion (PropertyDoesNotExists
+        // beim Anlegen einer Meldung). Die Antwort sagte "TIA hat alles zurueckgenommen", die Sperre griff nicht.
+        private static volatile bool _caught;
+
+        // In jedem catch, das einen Openness-Fehler in eine Antwort verwandelt, zuerst aufrufen.
+        // true: TIA ist schon weg. Der Aufrufer wirft die Ausnahme dann weiter, damit Tools.Call den Absturz meldet und sperrt.
+        public static bool Caught(Exception ex)
+        {
+            if (ex == null || ex is ToolException) return false;
+            _caught = true;
+            if (_caughtException == null) _caughtException = ex.ToString();
+            if (_firstFailure == null)
+            {
+                Exception inner = ex;
+                while (inner.InnerException != null) inner = inner.InnerException;
+                string message = (inner.Message ?? "").Replace("\r", " ").Replace("\n", " ");
+                if (message.Length > 200) message = message.Substring(0, 200) + "...";
+                _firstFailure = (_step ?? "?") + ": " + message;
+            }
+            return IsTiaGone(ex, 0);
+        }
+
+        // Vollstaendige erste abgefangene Ausnahme mit Stack, fuers Protokoll, wenn TIA danach stirbt.
+        private static volatile string _caughtException;
+
+        public static string CaughtException
+        {
+            get { return _caughtException; }
+        }
+
+        public static bool CaughtOpennessError
+        {
+            get { return _caught; }
+        }
+
+        // Wartet nach einem abgefangenen Openness-Fehler, ob der TIA-Prozess stirbt. Am 14.11.2026 lag der Tod bis zu 9 s nach der Antwort.
+        public static bool DiesWithin(int processId, int milliseconds)
+        {
+            if (processId <= 0) return false;
+            var watch = Stopwatch.StartNew();
+            while (true)
+            {
+                if (ProcessGone(processId)) return true;
+                if (watch.ElapsedMilliseconds >= milliseconds) return false;
+                System.Threading.Thread.Sleep(250);
+            }
         }
 
         public static void Step(string step)
@@ -120,20 +174,106 @@ namespace Herzog.TiaHmi
             return targets;
         }
 
+        // Sperre je Objekt (ab 0.8.1). Anlass 15.11.2026: Ein Bild liess TIA beim Lesen der Texte einer einzigen Taste sterben.
+        // Die Sperre des ganzen Bildes machte es unlesbar und unaenderbar. Nennt der Schritt ein Objekt ("Objekt 'X' ..."),
+        // lesen hmi_unified_lesen und hmi_unified_aendern das Bild weiter, lassen an X aber die Texte aus und aendern X nicht.
+        private static readonly System.Text.RegularExpressions.Regex ObjectInStep =
+            new System.Text.RegularExpressions.Regex(@"Objekt '([^']+)'");
+
+        private static volatile HashSet<string> _badObjects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static volatile List<string> _badNotes = new List<string>();
+
+        public static bool IsBadObject(string name)
+        {
+            return name != null && _badObjects.Contains(name);
+        }
+
+        public static IList<string> BadObjectNotes
+        {
+            get { return _badNotes.AsReadOnly(); }
+        }
+
+        // Werkzeuge, die bei einem Absturz an einem bestimmten Objekt das Bild weiter bearbeiten duerfen.
+        public static bool WorksAroundObjects(string tool)
+        {
+            return tool == "hmi_unified_lesen" || tool == "hmi_unified_aendern";
+        }
+
+        public static string ObjectOf(string step)
+        {
+            if (step == null) return null;
+            var m = ObjectInStep.Match(step);
+            return m.Success ? m.Groups[1].Value : null;
+        }
+
+        // Fuellt IsBadObject fuer dieses Bild. Vor hmi_unified_lesen und hmi_unified_aendern aufrufen.
+        public void LoadBadObjects(string project, List<string> targets)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var notes = new List<string>();
+            if (project != null)
+            {
+                foreach (Dictionary<string, object> e in Read())
+                {
+                    if (!string.Equals(Text(e, "version"), Program.Version, StringComparison.Ordinal)) continue;
+                    if (!string.Equals(Text(e, "projekt"), project, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!KnownTargets(e).Any(k => targets.Any(t => SameTarget(k, t)))) continue;
+                    string obj = ObjectOf(Text(e, "schritt"));
+                    if (obj == null || !names.Add(obj)) continue;
+                    notes.Add("Objekt '" + obj + "': Am " + Text(e, "zeit") + " ist TIA daran abgestuerzt (" + Text(e, "schritt") +
+                        "). tia-hmi liest seine Texte nicht und aendert es nicht. Dieses Objekt von Hand in TIA bearbeiten.");
+                }
+            }
+            _badObjects = names;
+            _badNotes = notes;
+        }
+
+        private static List<string> KnownTargets(Dictionary<string, object> e)
+        {
+            return e.ContainsKey("ziele") && e["ziele"] is System.Collections.IEnumerable
+                ? ((System.Collections.IEnumerable)e["ziele"]).Cast<object>().Select(Convert.ToString).ToList()
+                : new List<string>();
+        }
+
+        // Ziele gleich? Bei "unified-...:<hmi>/<name>" darf die HMI auf einer Seite fehlen (Aufruf ohne hmi).
+        // Beobachtet 14./15.11.2026: Derselbe Nutzer rief einmal mit, einmal ohne hmi auf, die Sperre griff nicht.
+        private static bool SameTarget(string a, string b)
+        {
+            if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return true;
+            string ka, ha, na, kb, hb, nb;
+            if (!SplitTarget(a, out ka, out ha, out na) || !SplitTarget(b, out kb, out hb, out nb)) return false;
+            return string.Equals(ka, kb, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(na, nb, StringComparison.OrdinalIgnoreCase)
+                && (ha.Length == 0 || hb.Length == 0 || string.Equals(ha, hb, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool SplitTarget(string t, out string kind, out string hmi, out string name)
+        {
+            kind = hmi = name = null;
+            if (t == null || !t.StartsWith("unified-", StringComparison.Ordinal)) return false;
+            int colon = t.IndexOf(':');
+            int slash = colon < 0 ? -1 : t.IndexOf('/', colon + 1);
+            if (slash < 0) return false;
+            kind = t.Substring(0, colon);
+            hmi = t.Substring(colon + 1, slash - colon - 1);
+            name = t.Substring(slash + 1);
+            return true;
+        }
+
         // Meldung, wenn dieser Aufruf in diesem Projekt schon einmal TIA beendet hat, sonst null.
-        public string Blocked(string project, List<string> targets)
+        public string Blocked(string project, List<string> targets, string tool)
         {
             if (project == null) return null;
             foreach (Dictionary<string, object> e in Read())
             {
                 if (!string.Equals(Text(e, "version"), Program.Version, StringComparison.Ordinal)) continue;
                 if (!string.Equals(Text(e, "projekt"), project, StringComparison.OrdinalIgnoreCase)) continue;
-                var known = e.ContainsKey("ziele") && e["ziele"] is System.Collections.IEnumerable
-                    ? ((System.Collections.IEnumerable)e["ziele"]).Cast<object>().Select(Convert.ToString).ToList()
-                    : new List<string>();
+                var known = KnownTargets(e);
                 // Das gespeicherte Ziel nennen: Es hat die Schreibweise aus dem abgestuerzten Aufruf.
-                string hit = known.FirstOrDefault(k => targets.Contains(k, StringComparer.OrdinalIgnoreCase));
+                string hit = known.FirstOrDefault(k => targets.Any(t => SameTarget(k, t)));
                 if (hit == null) continue;
+                // Absturz an einem Objekt eines Bildes: Lesen und Aendern laufen weiter, nur ohne dieses Objekt (LoadBadObjects).
+                if (WorksAroundObjects(tool) && hit.StartsWith("unified-bild:", StringComparison.Ordinal) && ObjectOf(Text(e, "schritt")) != null) continue;
                 return "Gesperrt: Am " + Text(e, "zeit") + " ist TIA Portal bei " + Text(e, "werkzeug") + " fuer " + Describe(hit) +
                     " in diesem Projekt abgestuerzt" + (Text(e, "schritt") != null ? " (zuletzt: " + Text(e, "schritt") + ")" : "") + ". " +
                     "tia-hmi fuehrt das nicht noch einmal aus, damit TIA nicht erneut abstuerzt und ungespeicherte Arbeit verliert. " +

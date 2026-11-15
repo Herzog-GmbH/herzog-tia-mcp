@@ -153,6 +153,7 @@ namespace Herzog.TiaHmi
                         foreach (Dictionary<string, object> op in ops)
                         {
                             step = Text(op, "aktion") + " " + (Text(op, "objekt") ?? Text(op, "name") ?? "");
+                            CrashGuard.Step(step);
                             Execute(run, op);
                         }
                         step = "Skriptpruefung";
@@ -173,6 +174,8 @@ namespace Herzog.TiaHmi
             {
                 if (ex is EngineeringSecurityException) throw;
                 _log.Write("hmi_unified_aendern abgebrochen bei " + step + ": " + ex);
+                // TIA schon weg: Dann ist nichts "zurueckgenommen", sondern alles Ungespeicherte verloren. Tools.Call meldet und sperrt.
+                if (CrashGuard.Caught(ex)) throw;
                 result["angewendet"] = false;
                 result["fehler"] = new List<object> { step + ": " + UnifiedProps.Innermost(ex) };
                 // Verweigert TIA den Commit, liegt die Ursache in einem frueher abgefangenen Fehler (z. B. beim Neuanlegen eines Widgets).
@@ -834,6 +837,12 @@ namespace Herzog.TiaHmi
             var errors = new List<string>();
             for (int i = 0; i < run.Scripts.Count; i++)
             {
+                CrashGuard.Step("Skriptpruefung " + run.ScriptNames[i]);
+                if (UnifiedProps.SyntaxCheckKillsTia(run.Scripts[i]))
+                {
+                    run.Warnings.Add(run.ScriptNames[i] + ": " + UnifiedProps.SyntaxCheckSkipped);
+                    continue;
+                }
                 HmiValidationResult r = run.Scripts[i].SyntaxCheck();
                 if (r == null) continue;
                 if (r.Errors != null) foreach (string e in r.Errors) errors.Add(run.ScriptNames[i] + ": " + e);
