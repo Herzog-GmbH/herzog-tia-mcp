@@ -1,8 +1,20 @@
 # herzog-tia-mcp
 
-MCP server for Siemens TIA Portal V21: an AI agent reads and changes PLC programs and HMI screens in the project that is open in TIA Portal, from a description in natural language.
+[![CI](https://img.shields.io/github/actions/workflow/status/Herzog-GmbH/herzog-tia-mcp/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/Herzog-GmbH/herzog-tia-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Herzog-GmbH/herzog-tia-mcp?style=flat-square)](https://github.com/Herzog-GmbH/herzog-tia-mcp/releases)
+[![TIA Portal](https://img.shields.io/badge/TIA_Portal-V21-009999.svg?style=flat-square&logo=siemens)](https://www.siemens.com/tia-portal)
+[![MCP](https://img.shields.io/badge/MCP-server-000000.svg?style=flat-square)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
-Built on [tia-portal-mcp](https://github.com/Czarnak/tia-portal-mcp) by Łukasz Czarnacki (MIT, taken over at v4.3.0, developed separately since). Adds a production profile and `TiaHmiMcp`, a second server for HMI screens.
+MCP server for Siemens TIA Portal V21: an AI agent (Claude Code, Codex, Copilot or any other MCP client) reads and changes PLC programs and HMI screens in the project that is open in TIA Portal, from a description in natural language.
+
+Made for daily production use at a machine builder, where programmers let the agent work and review the finished change:
+
+- **No confirmation prompts, no blind writes.** Every PLC write is compiled, read back and rolled back automatically if it adds compile errors. Everything can be undone, also after a restart.
+- **Targeted edits.** A one-line change in a 300,000-character block replaces one line, not the block.
+- **WinCC classic and Unified.** Read, change and create screens on Basic, Comfort and Advanced panels as well as WinCC Unified, including tags, alarms, text lists, scripts and dynamic SVG widgets.
+- **Beyond blocks.** Data types, instance DBs, watch tables, libraries and technology objects.
+- **Fail-safe stays untouched.** F blocks can be read, never changed.
 
 ## The idea
 
@@ -80,6 +92,10 @@ Live tests against a real TIA Portal are in `scripts/live`. Their client (`mcp_c
 | `test_live_widget.py` | Install a widget, restart TIA Portal, insert, bind, play with recording, update |
 | `test_live_extras.py` | Data types, instance DBs, rename, move, copy, watch tables, libraries, technology objects, classic delete, archive |
 | `test_live_crash.py` | TIA Portal dies during a session, the running servers recover |
+
+## Credits
+
+Built on [tia-portal-mcp](https://github.com/Czarnak/tia-portal-mcp) by Łukasz Czarnacki (MIT), taken over at v4.3.0 and developed separately since. herzog-tia-mcp adds the production profile with its write protections and `TiaHmiMcp`, the second server for HMI screens and everything else that works directly on Openness.
 
 ## License
 
