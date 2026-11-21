@@ -108,6 +108,7 @@ internal static class BlockSourceGenerator
 </Document>";
   }
 
+  // Portal supplies the layout; software-unit DBs reject a writable MemoryLayout.
   private static string GenerateGlobalDbXml(string blockName)
   {
     return $@"<?xml version=""1.0"" encoding=""utf-8""?>
@@ -117,7 +118,6 @@ internal static class BlockSourceGenerator
     <AttributeList>
       <AutoNumber>true</AutoNumber>
       <Interface><Sections xmlns=""http://www.siemens.com/automation/Openness/SW/Interface/v5""><Section Name=""Static"" /></Sections></Interface>
-      <MemoryLayout>Optimized</MemoryLayout>
       <Name>{blockName}</Name>
       <Namespace></Namespace>
       <ProgrammingLanguage>DB</ProgrammingLanguage>
