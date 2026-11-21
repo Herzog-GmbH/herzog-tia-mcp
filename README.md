@@ -38,7 +38,7 @@ What stays with a person: downloading to the PLC, going online and testing on th
 |---|---|---|
 | `produktiv` | Reads, PLC writes, compile, undo, project lifecycle (open, create, save, save as, archive, close). Network, version control and `hmi_write` are not offered, they cannot be taken back; HMI tags and alarms go through `hmi_unified_daten` in the second server | None. All protections above are on |
 | `read-only` | Reads only | None |
-| `read-write`, `full` | All 19 tools of tia-portal-mcp, without the protections | As in tia-portal-mcp. `full` is used to build the test project |
+| `read-write`, `full` | All 19 tools, without the protections of `produktiv` | `read-write` asks once per project lifecycle call, `full` does not ask. `full` is used to build the test project |
 
 ## TiaHmiMcp
 
@@ -92,10 +92,6 @@ Live tests against a real TIA Portal are in `scripts/live`. Their client (`mcp_c
 | `test_live_widget.py` | Install a widget, restart TIA Portal, insert, bind, play with recording, update |
 | `test_live_extras.py` | Data types, instance DBs, rename, move, copy, watch tables, libraries, technology objects, classic delete, archive |
 | `test_live_crash.py` | TIA Portal dies during a session, the running servers recover |
-
-## Credits
-
-Built on [tia-portal-mcp](https://github.com/Czarnak/tia-portal-mcp) by Łukasz Czarnacki (MIT), taken over at v4.3.0 and developed separately since. herzog-tia-mcp adds the production profile with its write protections and `TiaHmiMcp`, the second server for HMI screens and everything else that works directly on Openness.
 
 ## License
 

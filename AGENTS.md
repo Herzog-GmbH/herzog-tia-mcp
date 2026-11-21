@@ -1,6 +1,6 @@
 # herzog-tia-mcp
 
-This repository started from tia-portal-mcp v4.3.0 (MIT, see `LICENSE`) and is developed on its own. There is no upstream to sync with. Everything below this section is the original guide and still describes `read-write` and `full`.
+There is no upstream to sync with. Everything below this section is the older guide for the shared core and still describes `read-write` and `full`.
 
 Rules of this repository:
 

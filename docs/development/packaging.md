@@ -87,7 +87,7 @@ is running unless you pass `-AllowDirty` or `-StopRunningServer`:
    targets in `TiaMcpServer.csproj`):
 
    ```powershell
-   cd C:\Users\LCZ\Desktop\RnD\TIA-Portal\tia-portal-mcp
+   cd <repository root>
    dotnet restore TiaMcpServer.slnx
 
    $version = "2.3.2-local.39.ge65dc64"   # from step 2

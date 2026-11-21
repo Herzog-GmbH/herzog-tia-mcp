@@ -1,6 +1,6 @@
 # Supported TIA Portal Operations
 
-This directory is the reference for the public operation surface of `tia-portal-mcp`. It describes the MCP tools, operation names, supported data formats, safety rules, and current capability boundaries.
+This directory is the reference for the public operation surface of `TiaMcpServer`. It describes the MCP tools, operation names, supported data formats, safety rules, and current capability boundaries.
 
 The MCP surface is intentionally narrower than the complete TIA Portal Openness V21 API. A capability listed as a current limit is outside the server contract; it is not a statement that the underlying Openness API cannot perform that action.
 

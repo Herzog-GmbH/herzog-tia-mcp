@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the current `tia-portal-mcp` runtime architecture, tool
+This document describes the current `TiaMcpServer` runtime architecture, tool
 surface, access-mode enforcement, project binding, write-safety model, and test
 strategy.
 

@@ -1,6 +1,6 @@
 # Architecture decision records
 
-An ADR records one lasting decision: why it was made, what was rejected, and what it still forces on the code. ADRs 0001-0014 come from the project this repository started from (tia-portal-mcp v4.3.0, see `LICENSE`); they still describe the code as it is.
+An ADR records one lasting decision: why it was made, what was rejected, and what it still forces on the code. ADRs 0001-0014 are older than the `produktiv` mode; they still describe the code as it is.
 
 To add one, copy [TEMPLATE.md](TEMPLATE.md) to `NNNN-<slug>.md` with the next free number, add a row below, and commit it together with the change.
 

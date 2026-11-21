@@ -314,9 +314,7 @@ built lifecycle tokens only for the redesign to delete them.
 non-null before/after binding state and in-call Portal inventory. No request implicitly opens a
 project; ordinary reads never bind or switch. Project-tree cursors now reject binding changes as
 `cursor_binding_mismatch`. Mode counts are 7/17/17. The
-engineering log records the completed human dialog observation and tracks the
-`totally-integrated-claude` plugin's `tia-portal-mcp` skill migration; installed plugin files were
-not changed by this documentation task.
+engineering log records the completed human dialog observation.
 
 ### Phase 4: Align and Retire
 

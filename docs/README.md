@@ -5,8 +5,8 @@ complete until it is reachable from this index**, directly or through the index 
 directory — that rule is what keeps this index trustworthy.
 
 For the project overview, the `produktiv` access mode, TiaHmiMcp and the quick start, see the
-[README](../README.md). Most documents below were written for tia-portal-mcp v4.3.0, which this
-repository started from; they describe the `read-write` and `full` modes and the shared core.
+[README](../README.md). Most documents below are older than the `produktiv` mode and TiaHmiMcp; they describe the
+`read-write` and `full` modes and the shared core.
 
 ## Using the server
 
